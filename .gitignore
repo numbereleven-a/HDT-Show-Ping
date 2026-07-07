@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+dist/
+Reference/
+*.user
+*.suo
+*.cache
+*.log
+*.pdb
+*.zip
+/screenshot.PNG
+AGENTS.md
+task.txt
