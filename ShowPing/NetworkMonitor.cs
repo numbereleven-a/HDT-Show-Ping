@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Media;
@@ -19,9 +20,7 @@ namespace ShowPing
     {
         private const int TimeoutMilliseconds = 1500;
         private const int PacketLossSampleSize = 10;
-        private const int EndpointCacheSeconds = 5;
 
-        private readonly EndpointReader endpointReader = new EndpointReader();
         private readonly TcpEndpointFinder tcpEndpointFinder = new TcpEndpointFinder();
         private readonly DispatcherTimer timer = new DispatcherTimer();
         private readonly Queue<bool> pingHistory = new Queue<bool>();
@@ -31,10 +30,6 @@ namespace ShowPing
         private volatile bool disposed;
         private int settingsVersion;
         private string lastEndpointKey;
-        private string cachedAddress;
-        private ushort cachedPort;
-        private int cachedEndpointFailures;
-        private DateTime nextEndpointRefreshUtc = DateTime.MinValue;
         private ShowPingSettings settings;
 
         public NetworkMonitor(ShowPingSettings settings)
@@ -76,7 +71,6 @@ namespace ShowPing
                     CancelCurrentRefreshLocked();
                     pingHistory.Clear();
                     lastEndpointKey = null;
-                    ClearEndpointCache();
                 }
                 Publish(NetworkSnapshot.Empty);
             }
@@ -89,7 +83,7 @@ namespace ShowPing
             timer.Tick -= Timer_Tick;
             lock (sync)
             {
-                refreshCancellation.Cancel();
+                CancelCurrentRefreshLocked(false);
             }
         }
 
@@ -126,6 +120,9 @@ namespace ShowPing
 
                 Publish(snapshot);
             }
+            catch (OperationCanceledException)
+            {
+            }
             catch (Exception ex)
             {
                 Log.Error("ShowPing check error:\n" + ex);
@@ -144,23 +141,18 @@ namespace ShowPing
 
         private async Task<NetworkSnapshot> BuildSnapshotAsync(bool hasActiveGame, CancellationToken token)
         {
-            var pids = hasActiveGame
-                ? await Task.Run(() => GetHearthstonePids(), token).ConfigureAwait(false)
-                : new HashSet<uint>();
-
-            if (!hasActiveGame || pids.Count == 0)
+            if (!hasActiveGame)
             {
                 lock (sync)
                 {
                     pingHistory.Clear();
                     lastEndpointKey = null;
-                    ClearEndpointCache();
                 }
                 return NetworkSnapshot.Empty;
             }
 
             token.ThrowIfCancellationRequested();
-            var endpoint = await Task.Run(() => GetCurrentEndpoint(pids), token).ConfigureAwait(false);
+            var endpoint = await Task.Run(() => GetCurrentEndpoint(), token).ConfigureAwait(false);
             if (endpoint == null)
             {
                 lock (sync)
@@ -178,46 +170,75 @@ namespace ShowPing
             var probe = await MeasureTcpConnectAsync(endpoint.Address, endpoint.Port, token).ConfigureAwait(false);
             if (probe.Success)
             {
-                ClearCachedEndpointFailures();
                 RecordPingResult(true);
                 return NetworkSnapshot.Success(probe.Milliseconds, GetFailurePercent(), endpoint.Address, endpoint.Port);
             }
 
             if (probe.CountAsNetworkFailure)
-            {
-                if (RecordCachedEndpointFailure() >= 3)
-                    InvalidateEndpointCache();
                 RecordPingResult(false);
-            }
 
             return NetworkSnapshot.Unavailable(probe.Status, GetFailurePercent(), endpoint.Address, endpoint.Port);
         }
 
-        private Endpoint GetCurrentEndpoint(HashSet<uint> pids)
+        private Endpoint GetCurrentEndpoint()
         {
+            var endpoint = TryGetHdtServerInfoEndpoint();
+            if (endpoint != null)
+                return endpoint;
+
+            var pids = GetHearthstonePids();
             string address;
             ushort port;
-            if (TryGetCachedEndpoint(out address, out port))
-                return new Endpoint(address, port);
-
-            string logAddress;
-            ushort logPort;
-            var hasLogEndpoint = endpointReader.TryReadFromHearthstoneLogs(out logAddress, out logPort);
-            if (hasLogEndpoint
-                && tcpEndpointFinder.TryFindCurrentEndpoint(pids, logAddress, logPort, out address, out port))
-            {
-                CacheEndpoint(address, port);
-                return new Endpoint(address, port);
-            }
-
             if (tcpEndpointFinder.TryFindCurrentEndpoint(pids, out address, out port))
-            {
-                CacheEndpoint(address, port);
                 return new Endpoint(address, port);
-            }
 
-            ClearEndpointCache();
             return null;
+        }
+
+        private static Endpoint TryGetHdtServerInfoEndpoint()
+        {
+            try
+            {
+                var game = Core.Game;
+                if (game == null)
+                    return null;
+
+                var metaData = GetMemberValue(game, "MetaData");
+                var serverInfo = metaData != null ? GetMemberValue(metaData, "ServerInfo") : null;
+                if (serverInfo == null)
+                    return null;
+
+                var address = Convert.ToString(GetMemberValue(serverInfo, "Address"));
+                var portValue = GetMemberValue(serverInfo, "Port");
+                if (string.IsNullOrWhiteSpace(address) || portValue == null)
+                    return null;
+
+                var port = Convert.ToInt32(portValue);
+                if (port <= 0 || port > 65535)
+                    return null;
+
+                IPAddress parsed;
+                if (!IPAddress.TryParse(address.Trim('[', ']'), out parsed))
+                    return null;
+
+                return new Endpoint(address, (ushort)port);
+            }
+            catch (Exception ex)
+            {
+                Log.Info("ShowPing HDT server info unavailable: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static object GetMemberValue(object source, string name)
+        {
+            var type = source.GetType();
+            var property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+            if (property != null)
+                return property.GetValue(source, null);
+
+            var field = type.GetField(name, BindingFlags.Instance | BindingFlags.Public);
+            return field?.GetValue(source);
         }
 
         private static bool HasActiveGame()
@@ -252,6 +273,9 @@ namespace ShowPing
 
         private static async Task<ProbeResult> MeasureTcpConnectAsync(string address, ushort port, CancellationToken token)
         {
+            if (token.IsCancellationRequested)
+                return ProbeResult.InternalError("cancelled");
+
             IPAddress ip;
             if (!IPAddress.TryParse(address.Trim('[', ']'), out ip))
                 return ProbeResult.InternalError("bad endpoint");
@@ -313,74 +337,18 @@ namespace ShowPing
             }
         }
 
-        private bool TryGetCachedEndpoint(out string address, out ushort port)
-        {
-            lock (sync)
-            {
-                if (!string.IsNullOrWhiteSpace(cachedAddress) && DateTime.UtcNow < nextEndpointRefreshUtc)
-                {
-                    address = cachedAddress;
-                    port = cachedPort;
-                    return true;
-                }
-            }
-
-            address = null;
-            port = 0;
-            return false;
-        }
-
-        private void CacheEndpoint(string address, ushort port)
-        {
-            lock (sync)
-            {
-                cachedAddress = address;
-                cachedPort = port;
-                cachedEndpointFailures = 0;
-                nextEndpointRefreshUtc = DateTime.UtcNow.AddSeconds(EndpointCacheSeconds);
-            }
-        }
-
-        private void ClearEndpointCache()
-        {
-            lock (sync)
-            {
-                cachedAddress = null;
-                cachedPort = 0;
-                cachedEndpointFailures = 0;
-                nextEndpointRefreshUtc = DateTime.MinValue;
-            }
-        }
-
         private void CancelCurrentRefreshLocked()
         {
-            refreshCancellation.Cancel();
-            refreshCancellation = new CancellationTokenSource();
+            CancelCurrentRefreshLocked(true);
         }
 
-        private void InvalidateEndpointCache()
+        private void CancelCurrentRefreshLocked(bool replace)
         {
-            lock (sync)
-            {
-                nextEndpointRefreshUtc = DateTime.MinValue;
-            }
-        }
-
-        private int RecordCachedEndpointFailure()
-        {
-            lock (sync)
-            {
-                cachedEndpointFailures++;
-                return cachedEndpointFailures;
-            }
-        }
-
-        private void ClearCachedEndpointFailures()
-        {
-            lock (sync)
-            {
-                cachedEndpointFailures = 0;
-            }
+            var previous = refreshCancellation;
+            if (replace)
+                refreshCancellation = new CancellationTokenSource();
+            previous.Cancel();
+            previous.Dispose();
         }
 
         private void RecordPingResult(bool success)

@@ -55,9 +55,6 @@ namespace ShowPing
             lossTextBlock.Text = snapshot.LossText;
             lossTextBlock.Foreground = snapshot.Brush;
             lossTextBlock.Visibility = showPacketLoss ? Visibility.Visible : Visibility.Collapsed;
-            ToolTip = string.IsNullOrWhiteSpace(snapshot.Endpoint)
-                ? null
-                : "Endpoint: " + snapshot.Endpoint;
         }
 
         private static TextBlock CreateTextBlock(double fontSize)

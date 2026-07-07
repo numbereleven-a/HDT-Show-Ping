@@ -41,7 +41,10 @@ namespace ShowPing
             OverlayExtensions.SetIsOverlayHitTestVisible(moveThumb, true);
 
             if (canvas != null && !canvas.Children.Contains(moveThumb))
+            {
                 canvas.Children.Add(moveThumb);
+                Panel.SetZIndex(moveThumb, 1001);
+            }
         }
 
         public bool IsMoving => isMoving;

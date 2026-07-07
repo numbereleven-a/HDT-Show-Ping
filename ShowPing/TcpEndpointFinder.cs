@@ -31,34 +31,52 @@ namespace ShowPing
 
             var connections = GetTcpConnections()
                 .Where(x => pids.Contains(x.OwningProcess))
+                .ToList();
+
+            var filteredConnections = connections
                 .Where(x => IsUsefulRemoteAddress(x.Address))
                 .ToList();
 
-            var selected = connections.FirstOrDefault(x => MatchesPreferredEndpoint(x, preferredAddress, preferredPort));
-            if (selected == null)
-            {
-                if (!string.IsNullOrWhiteSpace(preferredAddress) && preferredPort != 0)
-                    return false;
-
-                var candidates = connections
-                    .Where(x => KnownGamePorts.Contains(x.Port))
-                    .OrderBy(x => x.Port == PreferredGamePort ? 0 : 1)
-                    .ThenByDescending(x => x.Port)
-                    .ToList();
-
-                if (candidates.Count == 0)
-                    return false;
-                if (candidates.Count > 1)
-                {
-                    Log.Info("ShowPing endpoint ambiguous: " + FormatCandidates(candidates));
-                    return false;
-                }
-
-                selected = candidates[0];
-            }
+            EndpointCandidate selected;
+            if (!TrySelectEndpoint(filteredConnections, preferredAddress, preferredPort, out selected)
+                && !TrySelectEndpoint(connections, preferredAddress, preferredPort, out selected))
+                return false;
 
             address = selected.Address.ToString();
             port = selected.Port;
+            return true;
+        }
+
+        private static bool TrySelectEndpoint(
+            List<EndpointCandidate> connections,
+            string preferredAddress,
+            ushort preferredPort,
+            out EndpointCandidate selected)
+        {
+            selected = null;
+            if (connections.Count == 0)
+                return false;
+
+            selected = connections.FirstOrDefault(x => MatchesPreferredEndpoint(x, preferredAddress, preferredPort));
+            if (selected != null)
+                return true;
+
+            if (!string.IsNullOrWhiteSpace(preferredAddress) && preferredPort != 0)
+                return false;
+
+            var candidates = connections
+                .Where(x => KnownGamePorts.Contains(x.Port))
+                .OrderBy(x => x.Port == PreferredGamePort ? 0 : 1)
+                .ThenByDescending(x => x.Port)
+                .ToList();
+
+            if (candidates.Count == 0)
+                return false;
+
+            selected = candidates[0];
+            if (candidates.Count > 1)
+                Log.Info("ShowPing endpoint multiple candidates, selected fallback: " + FormatCandidates(candidates));
+
             return true;
         }
 

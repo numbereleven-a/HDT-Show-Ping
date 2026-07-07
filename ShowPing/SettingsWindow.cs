@@ -2,6 +2,7 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Media;
 
 namespace ShowPing
 {
@@ -17,7 +18,7 @@ namespace ShowPing
         private readonly TextBlock statusTextBlock;
         private readonly Action<ShowPingSettings> applySettings;
 
-        public SettingsWindow(ShowPingSettings settings, Action<ShowPingSettings> applySettings)
+        public SettingsWindow(ShowPingSettings settings, Version version, Action<ShowPingSettings> applySettings)
         {
             this.applySettings = applySettings;
             ResultSettings = settings.Clone();
@@ -55,6 +56,13 @@ namespace ShowPing
                 TextWrapping = TextWrapping.Wrap
             };
             stack.Children.Add(statusTextBlock);
+            stack.Children.Add(new TextBlock
+            {
+                Text = "Version " + version,
+                FontSize = 11,
+                Foreground = Brushes.Gray,
+                Margin = new Thickness(0, 6, 0, 0)
+            });
 
             var buttons = new StackPanel
             {
@@ -240,7 +248,7 @@ namespace ShowPing
         private void ApplyButton_Click(object sender, RoutedEventArgs e)
         {
             ReadSettingsFromUi();
-            applySettings(ResultSettings);
+            applySettings(ResultSettings.Clone());
             statusTextBlock.Text = "Settings applied.";
         }
 
@@ -255,7 +263,7 @@ namespace ShowPing
         {
             int interval;
             if (!int.TryParse(intervalTextBox.Text, out interval))
-                interval = 2;
+                interval = ResultSettings.CheckIntervalSeconds;
 
             ResultSettings.ShowServerPing = showServerPingCheckBox.IsChecked == true;
             ResultSettings.ShowPacketLoss = showPacketLossCheckBox.IsChecked == true;

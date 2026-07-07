@@ -52,7 +52,6 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="EndpointReader.cs" />
     <Compile Include="NetworkMonitor.cs" />
     <Compile Include="NetworkOverlayControl.cs" />
     <Compile Include="OverlayPlacementController.cs" />
