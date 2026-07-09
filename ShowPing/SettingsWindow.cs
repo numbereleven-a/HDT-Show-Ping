@@ -10,12 +10,16 @@ namespace ShowPing
     {
         private readonly CheckBox showServerPingCheckBox;
         private readonly CheckBox showPacketLossCheckBox;
+        private readonly CheckBox showEndpointIpCheckBox;
+        private readonly CheckBox compactModeCheckBox;
+        private ComboBox fontWeightComboBox;
         private TextBox intervalTextBox;
         private Slider textScaleSlider;
         private Slider opacitySlider;
         private TextBlock textScaleValueTextBlock;
         private TextBlock opacityValueTextBlock;
         private readonly TextBlock statusTextBlock;
+        private readonly TextBlock versionTextBlock;
         private readonly Action<ShowPingSettings> applySettings;
 
         public SettingsWindow(ShowPingSettings settings, Version version, Action<ShowPingSettings> applySettings)
@@ -25,7 +29,8 @@ namespace ShowPing
 
             Title = "ShowPing";
             Width = 420;
-            Height = 292;
+            Height = 430;
+            MinHeight = 430;
             ResizeMode = ResizeMode.NoResize;
             ShowInTaskbar = false;
             SetSafeOwner();
@@ -34,18 +39,27 @@ namespace ShowPing
             {
                 Margin = new Thickness(16)
             };
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var stack = new StackPanel();
-            Grid.SetRow(stack, 0);
+            var scroller = new ScrollViewer
+            {
+                Content = stack,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+            Grid.SetRow(scroller, 0);
 
             showServerPingCheckBox = CreateCheckBox("Show server ping", ResultSettings.ShowServerPing);
             showPacketLossCheckBox = CreateCheckBox("Show failed checks", ResultSettings.ShowPacketLoss);
+            showEndpointIpCheckBox = CreateCheckBox("Show endpoint IP", ResultSettings.ShowEndpointIp);
+            compactModeCheckBox = CreateCheckBox("Compact mode", ResultSettings.CompactMode);
 
             stack.Children.Add(showServerPingCheckBox);
             stack.Children.Add(showPacketLossCheckBox);
+            stack.Children.Add(showEndpointIpCheckBox);
+            stack.Children.Add(compactModeCheckBox);
+            stack.Children.Add(CreateFontWeightRow());
             stack.Children.Add(CreateScaleRow());
             stack.Children.Add(CreateOpacityRow());
             stack.Children.Add(CreateIntervalRow());
@@ -56,20 +70,30 @@ namespace ShowPing
                 TextWrapping = TextWrapping.Wrap
             };
             stack.Children.Add(statusTextBlock);
-            stack.Children.Add(new TextBlock
+
+            var footer = new Grid
             {
-                Text = "Version " + version,
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetRow(footer, 1);
+
+            versionTextBlock = new TextBlock
+            {
+                Text = "Version " + version.ToString(2),
                 FontSize = 11,
                 Foreground = Brushes.Gray,
-                Margin = new Thickness(0, 6, 0, 0)
-            });
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(versionTextBlock, 0);
 
             var buttons = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Right
             };
-            Grid.SetRow(buttons, 2);
+            Grid.SetColumn(buttons, 1);
 
             var applyButton = new Button { Content = "Apply", Width = 78, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
             applyButton.Click += ApplyButton_Click;
@@ -79,9 +103,11 @@ namespace ShowPing
             buttons.Children.Add(applyButton);
             buttons.Children.Add(okButton);
             buttons.Children.Add(cancelButton);
+            footer.Children.Add(versionTextBlock);
+            footer.Children.Add(buttons);
 
-            root.Children.Add(stack);
-            root.Children.Add(buttons);
+            root.Children.Add(scroller);
+            root.Children.Add(footer);
             Content = root;
         }
 
@@ -165,6 +191,55 @@ namespace ShowPing
             panel.Children.Add(textScaleValueTextBlock);
             UpdateScaleValueText();
 
+            return panel;
+        }
+
+        private FrameworkElement CreateFontWeightRow()
+        {
+            fontWeightComboBox = CreateComboBox(
+                new[] { "Normal", "SemiBold", "Bold", "ExtraBold" },
+                ResultSettings.FontWeightMode);
+            return CreateComboRow("Font weight:", fontWeightComboBox);
+        }
+
+        private static ComboBox CreateComboBox(string[] values, int selectedIndex)
+        {
+            var comboBox = new ComboBox
+            {
+                Height = 24,
+                MinWidth = 140,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            foreach (var value in values)
+                comboBox.Items.Add(value);
+
+            if (selectedIndex < 0 || selectedIndex >= values.Length)
+                selectedIndex = 0;
+            comboBox.SelectedIndex = selectedIndex;
+            return comboBox;
+        }
+
+        private static FrameworkElement CreateComboRow(string labelText, ComboBox comboBox)
+        {
+            var panel = new Grid
+            {
+                Margin = new Thickness(0, 2, 0, 8)
+            };
+            panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var label = new TextBlock
+            {
+                Text = labelText,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+            Grid.SetColumn(label, 0);
+            panel.Children.Add(label);
+
+            Grid.SetColumn(comboBox, 1);
+            panel.Children.Add(comboBox);
             return panel;
         }
 
@@ -267,6 +342,9 @@ namespace ShowPing
 
             ResultSettings.ShowServerPing = showServerPingCheckBox.IsChecked == true;
             ResultSettings.ShowPacketLoss = showPacketLossCheckBox.IsChecked == true;
+            ResultSettings.ShowEndpointIp = showEndpointIpCheckBox.IsChecked == true;
+            ResultSettings.CompactMode = compactModeCheckBox.IsChecked == true;
+            ResultSettings.FontWeightMode = fontWeightComboBox.SelectedIndex;
             ResultSettings.TextScalePercent = (int)Math.Round(textScaleSlider.Value);
             ResultSettings.OverlayOpacityPercent = (int)Math.Round(opacitySlider.Value);
             ResultSettings.CheckIntervalSeconds = interval;

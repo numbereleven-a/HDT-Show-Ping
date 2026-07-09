@@ -4,15 +4,26 @@ ShowPing is a plugin for [Hearthstone Deck Tracker](https://github.com/HearthSim
 
 It is intended for the Windows version of HDT.
 
-![ShowPing overlay](images/screenshot.png)
+## Screenshots
+
+### Overlay variants
+
+![ShowPing overlay variants](images/network_data_variants_combined.png)
+
+### Settings
+
+![ShowPing settings](images/options.jpg)
 
 ## Features
 
 - Shows Hearthstone server latency as `PING`
 - Shows failed connection checks as `CHECK FAIL`
+- Compact overlay mode
+- Optional endpoint IP display
 - Separate movable HDT overlay
 - Overlay opacity setting
 - Text scale setting from 75% to 150%
+- Font weight setting
 - Configurable check interval from 2 to 10 seconds
 
 ## How it works
@@ -31,6 +42,9 @@ Available settings:
 
 - Show server ping
 - Show failed checks
+- Show endpoint IP
+- Compact mode
+- Font weight
 - Text scale
 - Overlay opacity
 - Check interval

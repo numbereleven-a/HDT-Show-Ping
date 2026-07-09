@@ -10,5 +10,7 @@ Reference/
 *.pdb
 *.zip
 /screenshot.PNG
+/Options.jpg
+/network_data_variants_combined.png
 AGENTS.md
 task.txt

@@ -9,7 +9,10 @@ namespace ShowPing
     {
         public bool ShowServerPing { get; set; } = true;
         public bool ShowPacketLoss { get; set; } = true;
+        public bool ShowEndpointIp { get; set; }
+        public bool CompactMode { get; set; }
         public bool NetworkOverlayManualPosition { get; set; }
+        public int FontWeightMode { get; set; } = 1;
         public int TextScalePercent { get; set; } = 100;
         public int OverlayOpacityPercent { get; set; } = 75;
         public int CheckIntervalSeconds { get; set; } = 2;
@@ -24,7 +27,10 @@ namespace ShowPing
             {
                 ShowServerPing = ShowServerPing,
                 ShowPacketLoss = ShowPacketLoss,
+                ShowEndpointIp = ShowEndpointIp,
+                CompactMode = CompactMode,
                 NetworkOverlayManualPosition = NetworkOverlayManualPosition,
+                FontWeightMode = FontWeightMode,
                 TextScalePercent = TextScalePercent,
                 OverlayOpacityPercent = OverlayOpacityPercent,
                 CheckIntervalSeconds = CheckIntervalSeconds,
@@ -49,6 +55,10 @@ namespace ShowPing
                 OverlayOpacityPercent = 10;
             if (OverlayOpacityPercent > 100)
                 OverlayOpacityPercent = 100;
+            if (FontWeightMode < 0)
+                FontWeightMode = 0;
+            if (FontWeightMode > 3)
+                FontWeightMode = 3;
             if (NetworkOverlayWidth < 70)
                 NetworkOverlayWidth = 70;
             if (NetworkOverlayHeight < 18)

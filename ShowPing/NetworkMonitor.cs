@@ -131,7 +131,7 @@ namespace ShowPing
                     if (disposed || version != settingsVersion || !settings.ShowServerPing)
                         return;
                 }
-                Publish(NetworkSnapshot.Unavailable("error", GetFailurePercent(), null, 0));
+                Publish(NetworkSnapshot.Unavailable("error", GetFailurePercent(), null, 0, null));
             }
             finally
             {
@@ -171,13 +171,13 @@ namespace ShowPing
             if (probe.Success)
             {
                 RecordPingResult(true);
-                return NetworkSnapshot.Success(probe.Milliseconds, GetFailurePercent(), endpoint.Address, endpoint.Port);
+                return NetworkSnapshot.Success(probe.Milliseconds, GetFailurePercent(), endpoint.Address, endpoint.Port, probe.RemoteAddress);
             }
 
             if (probe.CountAsNetworkFailure)
                 RecordPingResult(false);
 
-            return NetworkSnapshot.Unavailable(probe.Status, GetFailurePercent(), endpoint.Address, endpoint.Port);
+            return NetworkSnapshot.Unavailable(probe.Status, GetFailurePercent(), endpoint.Address, endpoint.Port, probe.RemoteAddress);
         }
 
         private Endpoint GetCurrentEndpoint()
@@ -276,19 +276,19 @@ namespace ShowPing
             if (token.IsCancellationRequested)
                 return ProbeResult.InternalError("cancelled");
 
+            var host = address.Trim('[', ']');
             IPAddress ip;
-            if (!IPAddress.TryParse(address.Trim('[', ']'), out ip))
-                return ProbeResult.InternalError("bad endpoint");
+            var isIpAddress = IPAddress.TryParse(host, out ip);
 
-            if (ip.IsIPv4MappedToIPv6)
+            if (isIpAddress && ip.IsIPv4MappedToIPv6)
                 ip = ip.MapToIPv4();
 
             var stopwatch = Stopwatch.StartNew();
-            using (var client = new TcpClient(ip.AddressFamily))
+            using (var client = isIpAddress ? new TcpClient(ip.AddressFamily) : new TcpClient())
             using (token.Register(client.Close))
             using (var cts = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
-                var connectTask = client.ConnectAsync(ip, port);
+                var connectTask = isIpAddress ? client.ConnectAsync(ip, port) : client.ConnectAsync(host, port);
                 var timeoutTask = Task.Delay(TimeoutMilliseconds, cts.Token);
                 var completed = await Task.WhenAny(connectTask, timeoutTask).ConfigureAwait(false);
                 if (token.IsCancellationRequested)
@@ -306,7 +306,11 @@ namespace ShowPing
                 {
                     await connectTask.ConfigureAwait(false);
                     stopwatch.Stop();
-                    return ProbeResult.Ok(stopwatch.ElapsedMilliseconds);
+                    var remoteEndPoint = client.Client.RemoteEndPoint as IPEndPoint;
+                    var remoteAddress = remoteEndPoint?.Address;
+                    if (remoteAddress != null && remoteAddress.IsIPv4MappedToIPv6)
+                        remoteAddress = remoteAddress.MapToIPv4();
+                    return ProbeResult.Ok(stopwatch.ElapsedMilliseconds, remoteAddress?.ToString());
                 }
                 catch (SocketException ex)
                 {
@@ -387,44 +391,51 @@ namespace ShowPing
 
     internal sealed class NetworkSnapshot
     {
-        public static readonly NetworkSnapshot Empty = new NetworkSnapshot("PING: --", "CHECK FAIL: --", Brushes.Gray, null, false);
-        private NetworkSnapshot(string pingText, string lossText, Brush brush, string endpoint, bool hasMeasurement)
+        public static readonly NetworkSnapshot Empty = new NetworkSnapshot("--", "--", Brushes.Gray, null, null, false);
+        private NetworkSnapshot(string pingValue, string lossValue, Brush brush, string endpoint, string endpointIp, bool hasMeasurement)
         {
-            PingText = pingText;
-            LossText = lossText;
+            PingValue = pingValue;
+            LossValue = lossValue;
             Brush = brush;
             Endpoint = endpoint;
+            EndpointIp = endpointIp;
             HasMeasurement = hasMeasurement;
         }
 
-        public string PingText { get; }
-        public string LossText { get; }
+        public string PingValue { get; }
+        public string LossValue { get; }
         public Brush Brush { get; }
         public string Endpoint { get; }
+        public string EndpointIp { get; }
         public bool HasMeasurement { get; }
 
-        public static NetworkSnapshot Success(long milliseconds, int failedPercent, string address, ushort port)
+        public string PingText => "PING: " + PingValue;
+        public string LossText => "CHECK FAIL: " + LossValue;
+
+        public static NetworkSnapshot Success(long milliseconds, int failedPercent, string address, ushort port, string endpointIp)
         {
             return new NetworkSnapshot(
-                "PING: " + milliseconds + " ms",
-                "CHECK FAIL: " + failedPercent + "%",
+                milliseconds + " ms",
+                failedPercent + "%",
                 GetPingBrush(milliseconds),
                 FormatEndpoint(address, port),
+                FormatEndpoint(endpointIp, port),
                 true);
         }
 
         public static NetworkSnapshot NoTarget(string reason)
         {
-            return new NetworkSnapshot("PING: " + reason, "CHECK FAIL: --", Brushes.Gray, null, false);
+            return new NetworkSnapshot(reason, "--", Brushes.Gray, null, null, false);
         }
 
-        public static NetworkSnapshot Unavailable(string status, int failedPercent, string address, ushort port)
+        public static NetworkSnapshot Unavailable(string status, int failedPercent, string address, ushort port, string endpointIp)
         {
             return new NetworkSnapshot(
-                "PING: " + status,
-                "CHECK FAIL: " + failedPercent + "%",
+                status,
+                failedPercent + "%",
                 Brushes.Red,
                 FormatEndpoint(address, port),
+                FormatEndpoint(endpointIp, port),
                 true);
         }
 
@@ -448,32 +459,34 @@ namespace ShowPing
 
     internal sealed class ProbeResult
     {
-        private ProbeResult(bool success, long milliseconds, string status, bool countAsNetworkFailure)
+        private ProbeResult(bool success, long milliseconds, string status, bool countAsNetworkFailure, string remoteAddress)
         {
             Success = success;
             Milliseconds = milliseconds;
             Status = status;
             CountAsNetworkFailure = countAsNetworkFailure;
+            RemoteAddress = remoteAddress;
         }
 
         public bool Success { get; }
         public long Milliseconds { get; }
         public string Status { get; }
         public bool CountAsNetworkFailure { get; }
+        public string RemoteAddress { get; }
 
-        public static ProbeResult Ok(long milliseconds)
+        public static ProbeResult Ok(long milliseconds, string remoteAddress)
         {
-            return new ProbeResult(true, milliseconds, null, false);
+            return new ProbeResult(true, milliseconds, null, false, remoteAddress);
         }
 
         public static ProbeResult NetworkFailure(string status)
         {
-            return new ProbeResult(false, 0, status, true);
+            return new ProbeResult(false, 0, status, true, null);
         }
 
         public static ProbeResult InternalError(string status)
         {
-            return new ProbeResult(false, 0, status, false);
+            return new ProbeResult(false, 0, status, false, null);
         }
     }
 
