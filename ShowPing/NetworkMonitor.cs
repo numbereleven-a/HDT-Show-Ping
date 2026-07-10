@@ -19,18 +19,29 @@ namespace ShowPing
     internal sealed class NetworkMonitor : IDisposable
     {
         private const int TimeoutMilliseconds = 1500;
+        private const int FallbackLookupTimeoutMilliseconds = 1200;
         private const int PacketLossSampleSize = 10;
+        private static readonly TimeSpan FallbackRefreshInterval = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan FallbackFailureCooldown = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan ErrorLogInterval = TimeSpan.FromMinutes(2);
 
         private readonly TcpEndpointFinder tcpEndpointFinder = new TcpEndpointFinder();
         private readonly DispatcherTimer timer = new DispatcherTimer();
         private readonly Queue<bool> pingHistory = new Queue<bool>();
         private readonly object sync = new object();
+        private readonly object logSync = new object();
         private CancellationTokenSource refreshCancellation = new CancellationTokenSource();
         private int pingInProgress;
         private volatile bool disposed;
         private int settingsVersion;
         private string lastEndpointKey;
         private ShowPingSettings settings;
+        private Endpoint cachedFallbackEndpoint;
+        private Task<Endpoint> fallbackLookupTask;
+        private DateTime nextFallbackRefreshUtc = DateTime.MinValue;
+        private DateTime fallbackLookupBlockedUntilUtc = DateTime.MinValue;
+        private DateTime nextHdtEndpointErrorLogUtc = DateTime.MinValue;
+        private DateTime nextCheckErrorLogUtc = DateTime.MinValue;
 
         public NetworkMonitor(ShowPingSettings settings)
         {
@@ -71,6 +82,7 @@ namespace ShowPing
                     CancelCurrentRefreshLocked();
                     pingHistory.Clear();
                     lastEndpointKey = null;
+                    ClearFallbackEndpointLocked();
                 }
                 Publish(NetworkSnapshot.Empty);
             }
@@ -84,6 +96,7 @@ namespace ShowPing
             lock (sync)
             {
                 CancelCurrentRefreshLocked(false);
+                ClearFallbackEndpointLocked();
             }
         }
 
@@ -125,7 +138,7 @@ namespace ShowPing
             }
             catch (Exception ex)
             {
-                Log.Error("ShowPing check error:\n" + ex);
+                LogCheckErrorThrottled("ShowPing check error:\n" + ex);
                 lock (sync)
                 {
                     if (disposed || version != settingsVersion || !settings.ShowServerPing)
@@ -147,19 +160,15 @@ namespace ShowPing
                 {
                     pingHistory.Clear();
                     lastEndpointKey = null;
+                    ClearFallbackEndpointLocked();
                 }
                 return NetworkSnapshot.Empty;
             }
 
             token.ThrowIfCancellationRequested();
-            var endpoint = await Task.Run(() => GetCurrentEndpoint(), token).ConfigureAwait(false);
+            var endpoint = await GetCurrentEndpointAsync(token).ConfigureAwait(false);
             if (endpoint == null)
             {
-                lock (sync)
-                {
-                    pingHistory.Clear();
-                    lastEndpointKey = null;
-                }
                 return tcpEndpointFinder.IsAvailable
                     ? NetworkSnapshot.NoTarget("no target")
                     : NetworkSnapshot.NoTarget("tcp table unavailable");
@@ -180,12 +189,87 @@ namespace ShowPing
             return NetworkSnapshot.Unavailable(probe.Status, GetFailurePercent(), endpoint.Address, endpoint.Port, probe.RemoteAddress);
         }
 
-        private Endpoint GetCurrentEndpoint()
+        private async Task<Endpoint> GetCurrentEndpointAsync(CancellationToken token)
         {
             var endpoint = TryGetHdtServerInfoEndpoint();
             if (endpoint != null)
                 return endpoint;
 
+            return await GetFallbackEndpointBoundedAsync(token).ConfigureAwait(false);
+        }
+
+        private async Task<Endpoint> GetFallbackEndpointBoundedAsync(CancellationToken token)
+        {
+            Task<Endpoint> lookup;
+            lock (sync)
+            {
+                var now = DateTime.UtcNow;
+                if (cachedFallbackEndpoint != null && now < nextFallbackRefreshUtc)
+                    return cachedFallbackEndpoint;
+
+                if (fallbackLookupTask != null && !fallbackLookupTask.IsCompleted)
+                    return cachedFallbackEndpoint;
+
+                if (now < fallbackLookupBlockedUntilUtc)
+                    return cachedFallbackEndpoint;
+
+                fallbackLookupTask = Task.Run(FindFallbackEndpoint, CancellationToken.None);
+                lookup = fallbackLookupTask;
+            }
+
+            var timeoutTask = Task.Delay(FallbackLookupTimeoutMilliseconds, token);
+            var completed = await Task.WhenAny(lookup, timeoutTask).ConfigureAwait(false);
+            if (completed != lookup)
+            {
+                ObserveFault(lookup);
+                token.ThrowIfCancellationRequested();
+
+                lock (sync)
+                {
+                    fallbackLookupBlockedUntilUtc = DateTime.UtcNow.Add(FallbackFailureCooldown);
+                    return cachedFallbackEndpoint;
+                }
+            }
+
+            try
+            {
+                var found = await lookup.ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+
+                lock (sync)
+                {
+                    if (ReferenceEquals(fallbackLookupTask, lookup))
+                        fallbackLookupTask = null;
+
+                    nextFallbackRefreshUtc = DateTime.UtcNow.Add(FallbackRefreshInterval);
+                    if (found != null)
+                        cachedFallbackEndpoint = found;
+                    if (!tcpEndpointFinder.IsAvailable)
+                        fallbackLookupBlockedUntilUtc = DateTime.UtcNow.Add(FallbackFailureCooldown);
+
+                    return cachedFallbackEndpoint;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                LogCheckErrorThrottled("ShowPing fallback endpoint lookup failed:\n" + ex);
+                lock (sync)
+                {
+                    if (ReferenceEquals(fallbackLookupTask, lookup))
+                        fallbackLookupTask = null;
+
+                    fallbackLookupBlockedUntilUtc = DateTime.UtcNow.Add(FallbackFailureCooldown);
+                    return cachedFallbackEndpoint;
+                }
+            }
+        }
+
+        private Endpoint FindFallbackEndpoint()
+        {
             var pids = GetHearthstonePids();
             string address;
             ushort port;
@@ -195,7 +279,7 @@ namespace ShowPing
             return null;
         }
 
-        private static Endpoint TryGetHdtServerInfoEndpoint()
+        private Endpoint TryGetHdtServerInfoEndpoint()
         {
             try
             {
@@ -225,7 +309,7 @@ namespace ShowPing
             }
             catch (Exception ex)
             {
-                Log.Info("ShowPing HDT server info unavailable: " + ex.Message);
+                LogHdtEndpointErrorThrottled(ex.Message);
                 return null;
             }
         }
@@ -353,6 +437,45 @@ namespace ShowPing
                 refreshCancellation = new CancellationTokenSource();
             previous.Cancel();
             previous.Dispose();
+        }
+
+        private void ClearFallbackEndpointLocked()
+        {
+            cachedFallbackEndpoint = null;
+            nextFallbackRefreshUtc = DateTime.MinValue;
+            fallbackLookupBlockedUntilUtc = DateTime.MinValue;
+        }
+
+        private static void ObserveFault(Task task)
+        {
+            _ = task.ContinueWith(
+                completed => { var ignored = completed.Exception; },
+                TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        private void LogHdtEndpointErrorThrottled(string message)
+        {
+            if (TryReserveLogSlot(ref nextHdtEndpointErrorLogUtc))
+                Log.Info("ShowPing HDT server info unavailable: " + message);
+        }
+
+        private void LogCheckErrorThrottled(string message)
+        {
+            if (TryReserveLogSlot(ref nextCheckErrorLogUtc))
+                Log.Error(message);
+        }
+
+        private bool TryReserveLogSlot(ref DateTime nextLogUtc)
+        {
+            lock (logSync)
+            {
+                var now = DateTime.UtcNow;
+                if (now < nextLogUtc)
+                    return false;
+
+                nextLogUtc = now.Add(ErrorLogInterval);
+                return true;
+            }
         }
 
         private void RecordPingResult(bool success)

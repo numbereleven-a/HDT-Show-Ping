@@ -12,6 +12,9 @@ namespace ShowPing
     {
         private static readonly HashSet<ushort> KnownGamePorts = new HashSet<ushort> { 1119, 3724 };
         private const ushort PreferredGamePort = 1119;
+        private static readonly TimeSpan ErrorLogInterval = TimeSpan.FromMinutes(2);
+        private static readonly object LogSync = new object();
+        private static DateTime nextErrorLogUtc = DateTime.MinValue;
 
         public bool IsAvailable { get; private set; } = true;
         public string LastError { get; private set; }
@@ -75,7 +78,7 @@ namespace ShowPing
 
             selected = candidates[0];
             if (candidates.Count > 1)
-                Log.Info("ShowPing endpoint multiple candidates, selected fallback: " + FormatCandidates(candidates));
+                LogInfoThrottled("ShowPing endpoint multiple candidates, selected fallback: " + FormatCandidates(candidates));
 
             return true;
         }
@@ -100,6 +103,7 @@ namespace ShowPing
         private List<EndpointCandidate> GetTcpConnections()
         {
             var candidates = new List<EndpointCandidate>();
+            var skippedRows = 0;
             try
             {
                 var options = new EnumerationOptions
@@ -138,28 +142,33 @@ namespace ShowPing
                                 var owningProcess = Convert.ToUInt32(owningProcessValue);
                                 candidates.Add(new EndpointCandidate(address, port, owningProcess));
                             }
-                            catch (Exception ex)
+                            catch (Exception)
                             {
-                                Log.Info("ShowPing TCP endpoint row skipped: " + ex.Message);
+                                skippedRows++;
                             }
                         }
                     }
                 }
 
+                var wasUnavailable = !IsAvailable;
                 IsAvailable = true;
                 LastError = null;
+                if (skippedRows > 0)
+                    LogInfoThrottled("ShowPing TCP endpoint rows skipped: " + skippedRows);
+                if (wasUnavailable)
+                    Log.Info("ShowPing TCP endpoint query restored.");
             }
             catch (ManagementException ex)
             {
                 IsAvailable = false;
                 LastError = ex.Message;
-                Log.Info("ShowPing TCP endpoint query unavailable: " + ex.Message);
+                LogInfoThrottled("ShowPing TCP endpoint query unavailable: " + ex.Message);
             }
             catch (Exception ex)
             {
                 IsAvailable = false;
                 LastError = ex.Message;
-                Log.Info("ShowPing TCP endpoint query failed: " + ex.Message);
+                LogInfoThrottled("ShowPing TCP endpoint query failed: " + ex.Message);
             }
 
             return candidates;
@@ -221,6 +230,19 @@ namespace ShowPing
         private static string FormatCandidates(IEnumerable<EndpointCandidate> candidates)
         {
             return string.Join(", ", candidates.Select(x => x.Address + ":" + x.Port));
+        }
+
+        private static void LogInfoThrottled(string message)
+        {
+            lock (LogSync)
+            {
+                if (DateTime.UtcNow < nextErrorLogUtc)
+                    return;
+
+                nextErrorLogUtc = DateTime.UtcNow.Add(ErrorLogInterval);
+            }
+
+            Log.Info(message);
         }
     }
 }

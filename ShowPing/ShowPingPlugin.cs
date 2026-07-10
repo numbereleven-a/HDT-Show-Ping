@@ -22,20 +22,40 @@ namespace ShowPing
         public string Description => "Shows Hearthstone server TCP latency and failed checks on a separate network overlay.";
         public string ButtonText => "Settings";
         public string Author => "numbereleven-a";
-        public Version Version => new Version(1, 1, 0);
+        public Version Version => new Version(1, 2);
         public MenuItem MenuItem { get; private set; }
 
         public void OnLoad()
         {
-            settings = SettingsStore.Load();
-            CreateMenuItem();
-            monitor = new NetworkMonitor(settings);
-            monitor.SnapshotChanged += Monitor_SnapshotChanged;
-            monitor.Start();
-            EnsureOverlay();
+            CleanupRuntime();
+            try
+            {
+                settings = SettingsStore.Load();
+                CreateMenuItem();
+                EnsureOverlay();
+
+                monitor = new NetworkMonitor(settings);
+                monitor.SnapshotChanged += Monitor_SnapshotChanged;
+                monitor.Start();
+            }
+            catch
+            {
+                CleanupRuntime();
+                MenuItem = null;
+                throw;
+            }
         }
 
         public void OnUnload()
+        {
+            CleanupRuntime();
+
+            if (settings != null)
+                SettingsStore.Save(settings);
+            MenuItem = null;
+        }
+
+        private void CleanupRuntime()
         {
             if (sizeChangedHandler != null && sizeChangedCanvas != null)
             {
@@ -52,8 +72,6 @@ namespace ShowPing
                 monitor.Dispose();
                 monitor = null;
             }
-
-            SettingsStore.Save(settings);
         }
 
         public void OnButtonPress()
