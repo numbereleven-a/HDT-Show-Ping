@@ -204,17 +204,23 @@ namespace ShowPing
             lock (sync)
             {
                 var now = DateTime.UtcNow;
-                if (cachedFallbackEndpoint != null && now < nextFallbackRefreshUtc)
+                if (now < nextFallbackRefreshUtc)
                     return cachedFallbackEndpoint;
 
-                if (fallbackLookupTask != null && !fallbackLookupTask.IsCompleted)
-                    return cachedFallbackEndpoint;
+                if (fallbackLookupTask != null)
+                {
+                    lookup = fallbackLookupTask;
+                    if (!lookup.IsCompleted)
+                        return cachedFallbackEndpoint;
+                }
+                else
+                {
+                    if (now < fallbackLookupBlockedUntilUtc)
+                        return cachedFallbackEndpoint;
 
-                if (now < fallbackLookupBlockedUntilUtc)
-                    return cachedFallbackEndpoint;
-
-                fallbackLookupTask = Task.Run(FindFallbackEndpoint, CancellationToken.None);
-                lookup = fallbackLookupTask;
+                    lookup = Task.Run(FindFallbackEndpoint, CancellationToken.None);
+                    fallbackLookupTask = lookup;
+                }
             }
 
             var timeoutTask = Task.Delay(FallbackLookupTimeoutMilliseconds, token);
@@ -226,7 +232,9 @@ namespace ShowPing
 
                 lock (sync)
                 {
-                    fallbackLookupBlockedUntilUtc = DateTime.UtcNow.Add(FallbackFailureCooldown);
+                    if (ReferenceEquals(fallbackLookupTask, lookup))
+                        fallbackLookupBlockedUntilUtc = DateTime.UtcNow.Add(FallbackFailureCooldown);
+
                     return cachedFallbackEndpoint;
                 }
             }
@@ -238,9 +246,11 @@ namespace ShowPing
 
                 lock (sync)
                 {
-                    if (ReferenceEquals(fallbackLookupTask, lookup))
-                        fallbackLookupTask = null;
+                    if (!ReferenceEquals(fallbackLookupTask, lookup))
+                        return cachedFallbackEndpoint;
 
+                    fallbackLookupTask = null;
+                    fallbackLookupBlockedUntilUtc = DateTime.MinValue;
                     nextFallbackRefreshUtc = DateTime.UtcNow.Add(FallbackRefreshInterval);
                     if (found != null)
                         cachedFallbackEndpoint = found;
@@ -250,19 +260,22 @@ namespace ShowPing
                     return cachedFallbackEndpoint;
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
+                token.ThrowIfCancellationRequested();
                 LogCheckErrorThrottled("ShowPing fallback endpoint lookup failed:\n" + ex);
                 lock (sync)
                 {
                     if (ReferenceEquals(fallbackLookupTask, lookup))
+                    {
                         fallbackLookupTask = null;
+                        fallbackLookupBlockedUntilUtc = DateTime.UtcNow.Add(FallbackFailureCooldown);
+                    }
 
-                    fallbackLookupBlockedUntilUtc = DateTime.UtcNow.Add(FallbackFailureCooldown);
                     return cachedFallbackEndpoint;
                 }
             }
@@ -441,6 +454,11 @@ namespace ShowPing
 
         private void ClearFallbackEndpointLocked()
         {
+            var lookup = fallbackLookupTask;
+            fallbackLookupTask = null;
+            if (lookup != null)
+                ObserveFault(lookup);
+
             cachedFallbackEndpoint = null;
             nextFallbackRefreshUtc = DateTime.MinValue;
             fallbackLookupBlockedUntilUtc = DateTime.MinValue;
