@@ -3,6 +3,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
+using Hearthstone_Deck_Tracker.API;
+using Hearthstone_Deck_Tracker.Enums;
 
 namespace ShowPing
 {
@@ -10,6 +12,7 @@ namespace ShowPing
     {
         private readonly TextBlock pingTextBlock;
         private readonly TextBlock lossTextBlock;
+        private readonly TextBlock regionTextBlock;
         private readonly TextBlock endpointTextBlock;
 
         public NetworkOverlayControl()
@@ -19,6 +22,8 @@ namespace ShowPing
 
             lossTextBlock = CreateTextBlock(12);
             lossTextBlock.Text = "CHECK FAIL: --";
+            regionTextBlock = CreateTextBlock(13);
+            regionTextBlock.Text = "";
             endpointTextBlock = CreateTextBlock(13);
             endpointTextBlock.Text = "";
 
@@ -29,6 +34,7 @@ namespace ShowPing
             };
             stack.Children.Add(pingTextBlock);
             stack.Children.Add(lossTextBlock);
+            stack.Children.Add(regionTextBlock);
             stack.Children.Add(endpointTextBlock);
 
             BorderThickness = new Thickness(1);
@@ -41,11 +47,13 @@ namespace ShowPing
             var scale = settings.TextScalePercent / 100.0;
             pingTextBlock.FontSize = 13 * scale;
             lossTextBlock.FontSize = 12 * scale;
+            regionTextBlock.FontSize = 13 * scale;
             endpointTextBlock.FontSize = 13 * scale;
 
             var fontWeight = GetFontWeight(settings.FontWeightMode);
             pingTextBlock.FontWeight = fontWeight;
             lossTextBlock.FontWeight = fontWeight;
+            regionTextBlock.FontWeight = fontWeight;
             endpointTextBlock.FontWeight = fontWeight;
 
             Width = double.NaN;
@@ -61,24 +69,55 @@ namespace ShowPing
         public void SetNetworkState(NetworkSnapshot snapshot, ShowPingSettings settings)
         {
             var endpointText = GetEndpointText(snapshot, settings);
+            var regionText = GetRegionText(settings);
 
             pingTextBlock.Text = settings.CompactMode
-                ? GetCompactText(snapshot, settings)
+                ? GetCompactText(snapshot, settings, regionText)
                 : snapshot.PingText;
             pingTextBlock.Foreground = snapshot.Brush;
             lossTextBlock.Text = snapshot.LossText;
             lossTextBlock.Foreground = snapshot.Brush;
             lossTextBlock.Visibility = !settings.CompactMode && settings.ShowPacketLoss ? Visibility.Visible : Visibility.Collapsed;
+            regionTextBlock.Text = settings.CompactMode || regionText == null ? "" : "REGION: " + regionText;
+            regionTextBlock.Foreground = snapshot.Brush;
+            regionTextBlock.Visibility = settings.CompactMode || regionText == null ? Visibility.Collapsed : Visibility.Visible;
             endpointTextBlock.Text = endpointText ?? "";
             endpointTextBlock.Foreground = snapshot.Brush;
             endpointTextBlock.Visibility = string.IsNullOrWhiteSpace(endpointText) ? Visibility.Collapsed : Visibility.Visible;
         }
 
-        private static string GetCompactText(NetworkSnapshot snapshot, ShowPingSettings settings)
+        private static string GetCompactText(NetworkSnapshot snapshot, ShowPingSettings settings, string regionText)
         {
-            if (!settings.ShowPacketLoss)
-                return "PING " + snapshot.PingValue;
-            return "PING " + snapshot.PingValue + " \u00b7 FAIL " + snapshot.LossValue;
+            var text = "PING " + snapshot.PingValue;
+            if (settings.ShowPacketLoss)
+                text += " \u00b7 FAIL " + snapshot.LossValue;
+            if (regionText != null)
+                text += " \u00b7 " + regionText;
+            return text;
+        }
+
+        private static string GetRegionText(ShowPingSettings settings)
+        {
+            if (!settings.ShowRegion)
+                return null;
+
+            var game = Core.Game;
+            if (game == null)
+                return null;
+
+            switch (game.CurrentRegion)
+            {
+                case Region.US:
+                    return "USA";
+                case Region.EU:
+                    return "EU";
+                case Region.ASIA:
+                    return "ASIA";
+                case Region.CHINA:
+                    return "CHINA";
+                default:
+                    return null;
+            }
         }
 
         private static string GetEndpointText(NetworkSnapshot snapshot, ShowPingSettings settings)
@@ -97,6 +136,8 @@ namespace ShowPing
         {
             var lines = 1;
             if (!settings.CompactMode && settings.ShowPacketLoss)
+                lines++;
+            if (!settings.CompactMode && settings.ShowRegion)
                 lines++;
             if (settings.ShowEndpointIp)
                 lines++;

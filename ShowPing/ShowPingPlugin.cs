@@ -14,6 +14,8 @@ namespace ShowPing
         private OverlayPlacementController placement;
         private Canvas overlayCanvas;
         private Canvas sizeChangedCanvas;
+        private SettingsWindow settingsWindow;
+        private bool suppressSettingsWindowClose;
         private volatile NetworkSnapshot snapshot = NetworkSnapshot.Empty;
         private DateTime nextPositionUpdate = DateTime.MinValue;
         private SizeChangedEventHandler sizeChangedHandler;
@@ -22,7 +24,7 @@ namespace ShowPing
         public string Description => "Shows Hearthstone server TCP latency and failed checks on a separate network overlay.";
         public string ButtonText => "Settings";
         public string Author => "numbereleven-a";
-        public Version Version => new Version(1, 3);
+        public Version Version => new Version(1, 4);
         public MenuItem MenuItem { get; private set; }
 
         public void OnLoad()
@@ -57,6 +59,14 @@ namespace ShowPing
 
         private void CleanupRuntime()
         {
+            if (settingsWindow != null)
+            {
+                suppressSettingsWindowClose = true;
+                settingsWindow.Close();
+                settingsWindow = null;
+                suppressSettingsWindowClose = false;
+            }
+
             if (sizeChangedHandler != null && sizeChangedCanvas != null)
             {
                 sizeChangedCanvas.SizeChanged -= sizeChangedHandler;
@@ -76,6 +86,14 @@ namespace ShowPing
 
         public void OnButtonPress()
         {
+            if (settingsWindow != null)
+            {
+                if (settingsWindow.WindowState == WindowState.Minimized)
+                    settingsWindow.WindowState = WindowState.Normal;
+                settingsWindow.Activate();
+                return;
+            }
+
             var committedSettings = settings.Clone();
             var window = new SettingsWindow(settings, Version, nextSettings =>
             {
@@ -83,16 +101,18 @@ namespace ShowPing
                 committedSettings = nextSettings.Clone();
                 ApplySettings(false);
             });
-            if (window.ShowDialog() == true)
+            settingsWindow = window;
+            window.Closed += (sender, args) =>
             {
-                settings = window.ResultSettings;
+                if (ReferenceEquals(settingsWindow, window))
+                    settingsWindow = null;
+                if (suppressSettingsWindowClose)
+                    return;
+
+                settings = window.Accepted ? window.ResultSettings : committedSettings;
                 ApplySettings(false);
-            }
-            else
-            {
-                settings = committedSettings;
-                ApplySettings(false);
-            }
+            };
+            window.Show();
         }
 
         public void OnUpdate()

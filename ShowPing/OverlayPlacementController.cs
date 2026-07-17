@@ -65,7 +65,7 @@ namespace ShowPing
 
         public void UpdateGrip()
         {
-            var moveMode = IsHdtMoveModeActive();
+            var moveMode = !settings.PinNetworkOverlayPosition || IsHdtMoveModeActive();
             if (moveMode != lastMoveMode)
             {
                 moveThumb.Visibility = moveMode ? Visibility.Visible : Visibility.Collapsed;

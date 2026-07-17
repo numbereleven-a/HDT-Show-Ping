@@ -8,9 +8,11 @@ namespace ShowPing
     public class ShowPingSettings
     {
         public bool ShowServerPing { get; set; } = true;
-        public bool ShowPacketLoss { get; set; } = true;
+        public bool ShowPacketLoss { get; set; }
         public bool ShowEndpointIp { get; set; }
-        public bool CompactMode { get; set; }
+        public bool ShowRegion { get; set; } = true;
+        public bool CompactMode { get; set; } = true;
+        public bool PinNetworkOverlayPosition { get; set; } = true;
         public bool NetworkOverlayManualPosition { get; set; }
         public int FontWeightMode { get; set; } = 1;
         public int TextScalePercent { get; set; } = 100;
@@ -28,7 +30,9 @@ namespace ShowPing
                 ShowServerPing = ShowServerPing,
                 ShowPacketLoss = ShowPacketLoss,
                 ShowEndpointIp = ShowEndpointIp,
+                ShowRegion = ShowRegion,
                 CompactMode = CompactMode,
+                PinNetworkOverlayPosition = PinNetworkOverlayPosition,
                 NetworkOverlayManualPosition = NetworkOverlayManualPosition,
                 FontWeightMode = FontWeightMode,
                 TextScalePercent = TextScalePercent,

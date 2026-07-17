@@ -20,7 +20,9 @@ It is intended for the Windows version of HDT.
 - Shows failed connection checks as `CHECK FAIL`
 - Compact overlay mode
 - Optional endpoint IP display
+- Optional game region display
 - Separate movable HDT overlay
+- Direct overlay dragging with position pinning
 - Overlay opacity setting
 - Text scale setting from 75% to 150%
 - Font weight setting
@@ -43,7 +45,9 @@ Available settings:
 - Show server ping
 - Show failed checks
 - Show endpoint IP
+- Show region
 - Compact mode
+- Pin overlay position
 - Font weight
 - Text scale
 - Overlay opacity

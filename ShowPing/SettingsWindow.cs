@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 
@@ -11,7 +12,9 @@ namespace ShowPing
         private readonly CheckBox showServerPingCheckBox;
         private readonly CheckBox showPacketLossCheckBox;
         private readonly CheckBox showEndpointIpCheckBox;
+        private readonly CheckBox showRegionCheckBox;
         private readonly CheckBox compactModeCheckBox;
+        private readonly CheckBox pinNetworkOverlayPositionCheckBox;
         private ComboBox fontWeightComboBox;
         private TextBox intervalTextBox;
         private Slider textScaleSlider;
@@ -28,11 +31,13 @@ namespace ShowPing
             ResultSettings = settings.Clone();
 
             Title = "ShowPing";
-            Width = 420;
-            Height = 430;
-            MinHeight = 430;
-            ResizeMode = ResizeMode.NoResize;
+            Width = 440;
+            Height = 560;
+            MinWidth = 420;
+            MinHeight = 470;
+            ResizeMode = ResizeMode.CanResizeWithGrip;
             ShowInTaskbar = false;
+            PreviewKeyDown += SettingsWindow_PreviewKeyDown;
             SetSafeOwner();
 
             var root = new Grid
@@ -53,12 +58,24 @@ namespace ShowPing
             showServerPingCheckBox = CreateCheckBox("Show server ping", ResultSettings.ShowServerPing);
             showPacketLossCheckBox = CreateCheckBox("Show failed checks", ResultSettings.ShowPacketLoss);
             showEndpointIpCheckBox = CreateCheckBox("Show endpoint IP", ResultSettings.ShowEndpointIp);
+            showRegionCheckBox = CreateCheckBox("Show region", ResultSettings.ShowRegion);
             compactModeCheckBox = CreateCheckBox("Compact mode", ResultSettings.CompactMode);
+            compactModeCheckBox.FontWeight = FontWeights.SemiBold;
+            compactModeCheckBox.Margin = new Thickness(0);
+            pinNetworkOverlayPositionCheckBox = CreateCheckBox(
+                "Pin overlay position",
+                ResultSettings.PinNetworkOverlayPosition);
+            pinNetworkOverlayPositionCheckBox.FontWeight = FontWeights.SemiBold;
+            pinNetworkOverlayPositionCheckBox.Margin = new Thickness(0);
 
+            stack.Children.Add(CreateHighlightedOption(compactModeCheckBox));
+            stack.Children.Add(CreateSectionTitle("Displayed data", new Thickness(0, 8, 0, 8)));
             stack.Children.Add(showServerPingCheckBox);
             stack.Children.Add(showPacketLossCheckBox);
             stack.Children.Add(showEndpointIpCheckBox);
-            stack.Children.Add(compactModeCheckBox);
+            stack.Children.Add(showRegionCheckBox);
+            stack.Children.Add(CreateSeparatedOption(pinNetworkOverlayPositionCheckBox));
+            stack.Children.Add(CreateSectionTitle("Appearance", new Thickness(0, 4, 0, 8)));
             stack.Children.Add(CreateFontWeightRow());
             stack.Children.Add(CreateScaleRow());
             stack.Children.Add(CreateOpacityRow());
@@ -99,7 +116,8 @@ namespace ShowPing
             applyButton.Click += ApplyButton_Click;
             var okButton = new Button { Content = "OK", Width = 78, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
             okButton.Click += OkButton_Click;
-            var cancelButton = new Button { Content = "Cancel", Width = 78, Height = 28, IsCancel = true };
+            var cancelButton = new Button { Content = "Cancel", Width = 78, Height = 28 };
+            cancelButton.Click += CancelButton_Click;
             buttons.Children.Add(applyButton);
             buttons.Children.Add(okButton);
             buttons.Children.Add(cancelButton);
@@ -112,6 +130,7 @@ namespace ShowPing
         }
 
         public ShowPingSettings ResultSettings { get; private set; }
+        public bool Accepted { get; private set; }
 
         private void SetSafeOwner()
         {
@@ -145,6 +164,44 @@ namespace ShowPing
                 Content = text,
                 IsChecked = isChecked,
                 Margin = new Thickness(0, 0, 0, 8)
+            };
+        }
+
+        private static FrameworkElement CreateHighlightedOption(CheckBox checkBox)
+        {
+            return new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(234, 244, 252)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(38, 115, 186)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(2),
+                Padding = new Thickness(8, 7, 8, 7),
+                Margin = new Thickness(0, 0, 0, 8),
+                Child = checkBox
+            };
+        }
+
+        private static FrameworkElement CreateSectionTitle(string text, Thickness margin)
+        {
+            return new TextBlock
+            {
+                Text = text.ToUpperInvariant(),
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.DimGray,
+                Margin = margin
+            };
+        }
+
+        private static FrameworkElement CreateSeparatedOption(CheckBox checkBox)
+        {
+            return new Border
+            {
+                BorderBrush = SystemColors.ActiveBorderBrush,
+                BorderThickness = new Thickness(0, 1, 0, 1),
+                Padding = new Thickness(0, 9, 0, 9),
+                Margin = new Thickness(0, 4, 0, 12),
+                Child = checkBox
             };
         }
 
@@ -330,7 +387,21 @@ namespace ShowPing
         private void OkButton_Click(object sender, RoutedEventArgs e)
         {
             ReadSettingsFromUi();
-            DialogResult = true;
+            Accepted = true;
+            Close();
+        }
+
+        private void CancelButton_Click(object sender, RoutedEventArgs e)
+        {
+            Close();
+        }
+
+        private void SettingsWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Escape)
+                return;
+
+            e.Handled = true;
             Close();
         }
 
@@ -343,7 +414,9 @@ namespace ShowPing
             ResultSettings.ShowServerPing = showServerPingCheckBox.IsChecked == true;
             ResultSettings.ShowPacketLoss = showPacketLossCheckBox.IsChecked == true;
             ResultSettings.ShowEndpointIp = showEndpointIpCheckBox.IsChecked == true;
+            ResultSettings.ShowRegion = showRegionCheckBox.IsChecked == true;
             ResultSettings.CompactMode = compactModeCheckBox.IsChecked == true;
+            ResultSettings.PinNetworkOverlayPosition = pinNetworkOverlayPositionCheckBox.IsChecked == true;
             ResultSettings.FontWeightMode = fontWeightComboBox.SelectedIndex;
             ResultSettings.TextScalePercent = (int)Math.Round(textScaleSlider.Value);
             ResultSettings.OverlayOpacityPercent = (int)Math.Round(opacitySlider.Value);
