@@ -21,7 +21,9 @@ namespace ShowPing
         private SizeChangedEventHandler sizeChangedHandler;
 
         public string Name => "ShowPing";
-        public string Description => "Shows Hearthstone server TCP latency and failed checks on a separate network overlay.";
+        public string Description =>
+            "Shows Hearthstone server TCP latency and failed checks on a separate network overlay.\n" +
+            "https://github.com/numbereleven-a/HDT-Show-Ping";
         public string ButtonText => "Settings";
         public string Author => "numbereleven-a";
         public Version Version => new Version(1, 4);
