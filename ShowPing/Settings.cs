@@ -8,16 +8,17 @@ namespace ShowPing
     public class ShowPingSettings
     {
         public bool ShowServerPing { get; set; } = true;
-        public bool ShowPacketLoss { get; set; }
+        public bool ShowPacketLoss { get; set; } = true;
+        public bool OnlyShowFailedChecksWhenDetected { get; set; } = true;
         public bool ShowEndpointIp { get; set; }
         public bool ShowRegion { get; set; } = true;
         public bool CompactMode { get; set; } = true;
-        public bool PinNetworkOverlayPosition { get; set; } = true;
+        public bool PinNetworkOverlayPosition { get; set; }
         public bool NetworkOverlayManualPosition { get; set; }
         public int FontWeightMode { get; set; } = 1;
         public int TextScalePercent { get; set; } = 100;
-        public int OverlayOpacityPercent { get; set; } = 75;
-        public int CheckIntervalSeconds { get; set; } = 2;
+        public int OverlayOpacityPercent { get; set; } = 10;
+        public int CheckIntervalSeconds { get; set; } = 3;
         public double NetworkOverlayLeft { get; set; } = 100;
         public double NetworkOverlayTop { get; set; } = 100;
         public double NetworkOverlayWidth { get; set; } = 106;
@@ -29,6 +30,7 @@ namespace ShowPing
             {
                 ShowServerPing = ShowServerPing,
                 ShowPacketLoss = ShowPacketLoss,
+                OnlyShowFailedChecksWhenDetected = OnlyShowFailedChecksWhenDetected,
                 ShowEndpointIp = ShowEndpointIp,
                 ShowRegion = ShowRegion,
                 CompactMode = CompactMode,

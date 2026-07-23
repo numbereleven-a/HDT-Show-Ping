@@ -12,17 +12,20 @@ It is intended for the Windows version of HDT.
 
 ### Settings
 
-![ShowPing settings](images/options.jpg)
+![ShowPing settings](images/options.png)
 
 ## Features
 
 - Shows Hearthstone server latency as `PING`
 - Shows failed connection checks as `CHECK FAIL`
+- Can hide failed checks until a connection problem is detected
+- Uses yellow for 10-20% failed checks and red for 30% or more
 - Compact overlay mode
 - Optional endpoint IP display
 - Optional game region display
 - Separate movable HDT overlay
 - Direct overlay dragging with position pinning
+- Movable live overlay preview for display configuration
 - Overlay opacity setting
 - Text scale setting from 75% to 150%
 - Font weight setting
@@ -44,6 +47,7 @@ Available settings:
 
 - Show server ping
 - Show failed checks
+- Only show when detected
 - Show endpoint IP
 - Show region
 - Compact mode
@@ -54,6 +58,7 @@ Available settings:
 - Check interval
 
 The overlay position can be moved using HDT's overlay unlock/move mode.
+The settings preview is also movable and cycles through hidden, yellow, and red failed-check states.
 
 ## Installation
 

@@ -11,6 +11,7 @@ namespace ShowPing
     {
         private readonly CheckBox showServerPingCheckBox;
         private readonly CheckBox showPacketLossCheckBox;
+        private readonly CheckBox onlyShowFailedChecksWhenDetectedCheckBox;
         private readonly CheckBox showEndpointIpCheckBox;
         private readonly CheckBox showRegionCheckBox;
         private readonly CheckBox compactModeCheckBox;
@@ -24,10 +25,21 @@ namespace ShowPing
         private readonly TextBlock statusTextBlock;
         private readonly TextBlock versionTextBlock;
         private readonly Action<ShowPingSettings> applySettings;
+        private readonly Action<ShowPingSettings> previewSettings;
+        private readonly Action stopPreview;
+        private readonly Button previewButton;
+        private bool previewActive;
 
-        public SettingsWindow(ShowPingSettings settings, Version version, Action<ShowPingSettings> applySettings)
+        public SettingsWindow(
+            ShowPingSettings settings,
+            Version version,
+            Action<ShowPingSettings> applySettings,
+            Action<ShowPingSettings> previewSettings,
+            Action stopPreview)
         {
             this.applySettings = applySettings;
+            this.previewSettings = previewSettings;
+            this.stopPreview = stopPreview;
             ResultSettings = settings.Clone();
 
             Title = "ShowPing";
@@ -57,6 +69,10 @@ namespace ShowPing
 
             showServerPingCheckBox = CreateCheckBox("Show server ping", ResultSettings.ShowServerPing);
             showPacketLossCheckBox = CreateCheckBox("Show failed checks", ResultSettings.ShowPacketLoss);
+            onlyShowFailedChecksWhenDetectedCheckBox = CreateCheckBox(
+                "Only show when detected",
+                ResultSettings.OnlyShowFailedChecksWhenDetected);
+            onlyShowFailedChecksWhenDetectedCheckBox.Margin = new Thickness(20, 0, 0, 8);
             showEndpointIpCheckBox = CreateCheckBox("Show endpoint IP", ResultSettings.ShowEndpointIp);
             showRegionCheckBox = CreateCheckBox("Show region", ResultSettings.ShowRegion);
             compactModeCheckBox = CreateCheckBox("Compact mode", ResultSettings.CompactMode);
@@ -72,9 +88,22 @@ namespace ShowPing
             stack.Children.Add(CreateSectionTitle("Displayed data", new Thickness(0, 8, 0, 8)));
             stack.Children.Add(showServerPingCheckBox);
             stack.Children.Add(showPacketLossCheckBox);
+            stack.Children.Add(onlyShowFailedChecksWhenDetectedCheckBox);
             stack.Children.Add(showEndpointIpCheckBox);
             stack.Children.Add(showRegionCheckBox);
             stack.Children.Add(CreateSeparatedOption(pinNetworkOverlayPositionCheckBox));
+
+            previewButton = new Button
+            {
+                Content = "Preview overlay",
+                Width = 126,
+                Height = 28,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 0, 0, 12)
+            };
+            previewButton.Click += PreviewButton_Click;
+            stack.Children.Add(previewButton);
+
             stack.Children.Add(CreateSectionTitle("Appearance", new Thickness(0, 4, 0, 8)));
             stack.Children.Add(CreateFontWeightRow());
             stack.Children.Add(CreateScaleRow());
@@ -127,6 +156,21 @@ namespace ShowPing
             root.Children.Add(scroller);
             root.Children.Add(footer);
             Content = root;
+
+            showPacketLossCheckBox.Checked += DisplayOption_Changed;
+            showPacketLossCheckBox.Unchecked += DisplayOption_Changed;
+            showServerPingCheckBox.Checked += DisplayOption_Changed;
+            showServerPingCheckBox.Unchecked += DisplayOption_Changed;
+            showEndpointIpCheckBox.Checked += DisplayOption_Changed;
+            showEndpointIpCheckBox.Unchecked += DisplayOption_Changed;
+            showRegionCheckBox.Checked += DisplayOption_Changed;
+            showRegionCheckBox.Unchecked += DisplayOption_Changed;
+            compactModeCheckBox.Checked += DisplayOption_Changed;
+            compactModeCheckBox.Unchecked += DisplayOption_Changed;
+            onlyShowFailedChecksWhenDetectedCheckBox.Checked += DisplayOption_Changed;
+            onlyShowFailedChecksWhenDetectedCheckBox.Unchecked += DisplayOption_Changed;
+            fontWeightComboBox.SelectionChanged += DisplayOption_Changed;
+            UpdateDependentControls();
         }
 
         public ShowPingSettings ResultSettings { get; private set; }
@@ -233,7 +277,11 @@ namespace ShowPing
                 Value = ResultSettings.TextScalePercent,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            textScaleSlider.ValueChanged += (sender, args) => UpdateScaleValueText();
+            textScaleSlider.ValueChanged += (sender, args) =>
+            {
+                UpdateScaleValueText();
+                UpdatePreviewIfActive();
+            };
             Grid.SetColumn(textScaleSlider, 1);
             panel.Children.Add(textScaleSlider);
 
@@ -328,7 +376,11 @@ namespace ShowPing
                 Value = ResultSettings.OverlayOpacityPercent,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            opacitySlider.ValueChanged += (sender, args) => UpdateOpacityValueText();
+            opacitySlider.ValueChanged += (sender, args) =>
+            {
+                UpdateOpacityValueText();
+                UpdatePreviewIfActive();
+            };
             Grid.SetColumn(opacitySlider, 1);
             panel.Children.Add(opacitySlider);
 
@@ -369,7 +421,7 @@ namespace ShowPing
             panel.Children.Add(intervalTextBox);
             panel.Children.Add(new TextBlock
             {
-                Text = "2-10; default 2",
+                Text = "2-10; default 3",
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(8, 0, 0, 0)
             });
@@ -381,7 +433,27 @@ namespace ShowPing
         {
             ReadSettingsFromUi();
             applySettings(ResultSettings.Clone());
+            if (previewActive)
+                previewSettings(ResultSettings.Clone());
             statusTextBlock.Text = "Settings applied.";
+        }
+
+        private void PreviewButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (previewActive)
+            {
+                previewActive = false;
+                stopPreview();
+                previewButton.Content = "Preview overlay";
+                statusTextBlock.Text = "Preview stopped.";
+                return;
+            }
+
+            ReadSettingsFromUi();
+            previewActive = true;
+            previewSettings(ResultSettings.Clone());
+            previewButton.Content = "Stop preview";
+            statusTextBlock.Text = "Preview is movable. Failure states change automatically.";
         }
 
         private void OkButton_Click(object sender, RoutedEventArgs e)
@@ -413,6 +485,8 @@ namespace ShowPing
 
             ResultSettings.ShowServerPing = showServerPingCheckBox.IsChecked == true;
             ResultSettings.ShowPacketLoss = showPacketLossCheckBox.IsChecked == true;
+            ResultSettings.OnlyShowFailedChecksWhenDetected =
+                onlyShowFailedChecksWhenDetectedCheckBox.IsChecked == true;
             ResultSettings.ShowEndpointIp = showEndpointIpCheckBox.IsChecked == true;
             ResultSettings.ShowRegion = showRegionCheckBox.IsChecked == true;
             ResultSettings.CompactMode = compactModeCheckBox.IsChecked == true;
@@ -423,6 +497,26 @@ namespace ShowPing
             ResultSettings.CheckIntervalSeconds = interval;
             ResultSettings.Normalize();
             intervalTextBox.Text = ResultSettings.CheckIntervalSeconds.ToString();
+        }
+
+        private void DisplayOption_Changed(object sender, RoutedEventArgs e)
+        {
+            UpdateDependentControls();
+            UpdatePreviewIfActive();
+        }
+
+        private void UpdateDependentControls()
+        {
+            onlyShowFailedChecksWhenDetectedCheckBox.IsEnabled = showPacketLossCheckBox.IsChecked == true;
+        }
+
+        private void UpdatePreviewIfActive()
+        {
+            if (!previewActive)
+                return;
+
+            ReadSettingsFromUi();
+            previewSettings(ResultSettings.Clone());
         }
 
         private void UpdateScaleValueText()

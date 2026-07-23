@@ -532,11 +532,12 @@ namespace ShowPing
 
     internal sealed class NetworkSnapshot
     {
-        public static readonly NetworkSnapshot Empty = new NetworkSnapshot("--", "--", Brushes.Gray, null, null, false);
-        private NetworkSnapshot(string pingValue, string lossValue, Brush brush, string endpoint, string endpointIp, bool hasMeasurement)
+        public static readonly NetworkSnapshot Empty = new NetworkSnapshot("--", "--", -1, Brushes.Gray, null, null, false);
+        private NetworkSnapshot(string pingValue, string lossValue, int failurePercent, Brush brush, string endpoint, string endpointIp, bool hasMeasurement)
         {
             PingValue = pingValue;
             LossValue = lossValue;
+            FailurePercent = failurePercent;
             Brush = brush;
             Endpoint = endpoint;
             EndpointIp = endpointIp;
@@ -545,6 +546,7 @@ namespace ShowPing
 
         public string PingValue { get; }
         public string LossValue { get; }
+        public int FailurePercent { get; }
         public Brush Brush { get; }
         public string Endpoint { get; }
         public string EndpointIp { get; }
@@ -558,6 +560,7 @@ namespace ShowPing
             return new NetworkSnapshot(
                 milliseconds + " ms",
                 failedPercent + "%",
+                failedPercent,
                 GetPingBrush(milliseconds),
                 FormatEndpoint(address, port),
                 FormatEndpoint(endpointIp, port),
@@ -566,7 +569,7 @@ namespace ShowPing
 
         public static NetworkSnapshot NoTarget(string reason)
         {
-            return new NetworkSnapshot(reason, "--", Brushes.Gray, null, null, false);
+            return new NetworkSnapshot(reason, "--", -1, Brushes.Gray, null, null, false);
         }
 
         public static NetworkSnapshot Unavailable(string status, int failedPercent, string address, ushort port, string endpointIp)
@@ -574,6 +577,7 @@ namespace ShowPing
             return new NetworkSnapshot(
                 status,
                 failedPercent + "%",
+                failedPercent,
                 Brushes.Red,
                 FormatEndpoint(address, port),
                 FormatEndpoint(endpointIp, port),

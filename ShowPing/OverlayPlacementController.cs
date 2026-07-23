@@ -23,6 +23,7 @@ namespace ShowPing
         private ShowPingSettings settings;
         private bool isMoving;
         private bool lastMoveMode;
+        private bool forceMovable;
 
         public OverlayPlacementController(NetworkOverlayControl overlay, ShowPingSettings settings, Action saveSettings, Canvas canvas)
         {
@@ -49,6 +50,19 @@ namespace ShowPing
 
         public bool IsMoving => isMoving;
 
+        public bool ForceMovable
+        {
+            get => forceMovable;
+            set
+            {
+                if (forceMovable == value)
+                    return;
+
+                forceMovable = value;
+                UpdateGrip();
+            }
+        }
+
         public void UpdateSettings(ShowPingSettings nextSettings)
         {
             settings = nextSettings;
@@ -65,7 +79,7 @@ namespace ShowPing
 
         public void UpdateGrip()
         {
-            var moveMode = !settings.PinNetworkOverlayPosition || IsHdtMoveModeActive();
+            var moveMode = forceMovable || !settings.PinNetworkOverlayPosition || IsHdtMoveModeActive();
             if (moveMode != lastMoveMode)
             {
                 moveThumb.Visibility = moveMode ? Visibility.Visible : Visibility.Collapsed;
@@ -180,5 +194,6 @@ namespace ShowPing
                 return element.Height;
             return Math.Max(0, element.MinHeight);
         }
+
     }
 }

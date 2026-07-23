@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using Hearthstone_Deck_Tracker.API;
 using Hearthstone_Deck_Tracker.Plugins;
 
@@ -16,6 +17,11 @@ namespace ShowPing
         private Canvas sizeChangedCanvas;
         private SettingsWindow settingsWindow;
         private bool suppressSettingsWindowClose;
+        private bool previewActive;
+        private ShowPingSettings previewSettings;
+        private DispatcherTimer previewTimer;
+        private int previewFailureIndex;
+        private bool overlayPositionInitialized;
         private volatile NetworkSnapshot snapshot = NetworkSnapshot.Empty;
         private DateTime nextPositionUpdate = DateTime.MinValue;
         private SizeChangedEventHandler sizeChangedHandler;
@@ -26,7 +32,7 @@ namespace ShowPing
             "https://github.com/numbereleven-a/HDT-Show-Ping";
         public string ButtonText => "Settings";
         public string Author => "numbereleven-a";
-        public Version Version => new Version(1, 4);
+        public Version Version => new Version(1, 5);
         public MenuItem MenuItem { get; private set; }
 
         public void OnLoad()
@@ -36,7 +42,7 @@ namespace ShowPing
             {
                 settings = SettingsStore.Load();
                 CreateMenuItem();
-                EnsureOverlay();
+                EnsureOverlay(false);
 
                 monitor = new NetworkMonitor(settings);
                 monitor.SnapshotChanged += Monitor_SnapshotChanged;
@@ -61,6 +67,8 @@ namespace ShowPing
 
         private void CleanupRuntime()
         {
+            StopPreview(false);
+
             if (settingsWindow != null)
             {
                 suppressSettingsWindowClose = true;
@@ -97,12 +105,17 @@ namespace ShowPing
             }
 
             var committedSettings = settings.Clone();
-            var window = new SettingsWindow(settings, Version, nextSettings =>
-            {
-                settings = nextSettings;
-                committedSettings = nextSettings.Clone();
-                ApplySettings(false);
-            });
+            var window = new SettingsWindow(
+                settings,
+                Version,
+                nextSettings =>
+                {
+                    settings = nextSettings;
+                    committedSettings = nextSettings.Clone();
+                    ApplySettings(false);
+                },
+                StartPreview,
+                () => StopPreview(true));
             settingsWindow = window;
             window.Closed += (sender, args) =>
             {
@@ -111,7 +124,11 @@ namespace ShowPing
                 if (suppressSettingsWindowClose)
                     return;
 
-                settings = window.Accepted ? window.ResultSettings : committedSettings;
+                var positionedSettings = settings;
+                StopPreview(false);
+                var selectedSettings = window.Accepted ? window.ResultSettings : committedSettings;
+                CopyOverlayPosition(positionedSettings, selectedSettings);
+                settings = selectedSettings;
                 ApplySettings(false);
             };
             window.Show();
@@ -121,15 +138,26 @@ namespace ShowPing
         {
             if (overlay == null)
             {
-                if (settings?.ShowServerPing == true)
-                    EnsureOverlay();
+                if (previewActive)
+                {
+                    EnsureOverlay(true);
+                    RenderPreview();
+                }
+                else if (settings?.ShowServerPing == true)
+                {
+                    EnsureOverlay(false);
+                }
                 return;
             }
 
             if (DateTime.UtcNow >= nextPositionUpdate)
             {
                 if (TryGetOverlayCanvas() != overlayCanvas)
-                    EnsureOverlay();
+                {
+                    EnsureOverlay(previewActive);
+                    if (previewActive)
+                        RenderPreview();
+                }
                 PositionOverlay(false);
                 nextPositionUpdate = DateTime.UtcNow.AddSeconds(1);
             }
@@ -148,13 +176,21 @@ namespace ShowPing
         {
             SettingsStore.Save(settings);
             monitor.ApplySettings(settings);
+            if (previewActive)
+            {
+                EnsureOverlay(true);
+                placement?.UpdateSettings(settings);
+                RenderPreview();
+                return;
+            }
+
             if (!settings.ShowServerPing)
             {
                 RemoveOverlay();
                 return;
             }
 
-            EnsureOverlay();
+            EnsureOverlay(false);
             if (overlay != null)
             {
                 placement?.UpdateSettings(settings);
@@ -165,9 +201,9 @@ namespace ShowPing
             }
         }
 
-        private void EnsureOverlay()
+        private void EnsureOverlay(bool force)
         {
-            if (!settings.ShowServerPing)
+            if (!force && !settings.ShowServerPing)
             {
                 RemoveOverlay();
                 return;
@@ -195,6 +231,100 @@ namespace ShowPing
             PositionOverlay(false);
         }
 
+        private void StartPreview(ShowPingSettings nextSettings)
+        {
+            var wasActive = previewActive;
+            previewSettings = nextSettings.Clone();
+            previewSettings.Normalize();
+            previewActive = true;
+            if (!wasActive)
+                previewFailureIndex = 0;
+
+            EnsureOverlay(true);
+            placement?.UpdateSettings(settings);
+            if (placement != null)
+                placement.ForceMovable = true;
+            RenderPreview();
+
+            if (previewTimer == null)
+            {
+                previewTimer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromSeconds(2)
+                };
+                previewTimer.Tick += PreviewTimer_Tick;
+            }
+            previewTimer.Start();
+        }
+
+        private void StopPreview(bool restoreOverlay)
+        {
+            previewActive = false;
+            previewSettings = null;
+            if (previewTimer != null)
+                previewTimer.Stop();
+            if (placement != null)
+                placement.ForceMovable = false;
+
+            if (!restoreOverlay || settings == null)
+                return;
+
+            if (!settings.ShowServerPing)
+            {
+                RemoveOverlay();
+                return;
+            }
+
+            EnsureOverlay(false);
+            if (overlay == null)
+                return;
+
+            placement?.UpdateSettings(settings);
+            overlay.ApplySettings(settings);
+            overlay.SetNetworkState(snapshot, settings);
+            overlay.Visibility = Visibility.Visible;
+            PositionOverlay(false);
+        }
+
+        private void PreviewTimer_Tick(object sender, EventArgs e)
+        {
+            previewFailureIndex = (previewFailureIndex + 1) % 3;
+            RenderPreview();
+        }
+
+        private void RenderPreview()
+        {
+            if (!previewActive || previewSettings == null || overlay == null)
+                return;
+
+            var failurePercent = previewFailureIndex == 0 ? 20 : previewFailureIndex == 1 ? 40 : 0;
+            var previewSnapshot = NetworkSnapshot.Success(
+                42,
+                failurePercent,
+                "12.34.56.78",
+                1119,
+                "12.34.56.78");
+
+            overlay.ApplySettings(previewSettings);
+            overlay.SetNetworkState(previewSnapshot, previewSettings, "EU");
+            overlay.Visibility = Visibility.Visible;
+            if (placement != null)
+                placement.ForceMovable = true;
+            PositionOverlay(false);
+        }
+
+        private static void CopyOverlayPosition(ShowPingSettings source, ShowPingSettings destination)
+        {
+            if (source == null || destination == null || !source.NetworkOverlayManualPosition)
+                return;
+
+            destination.NetworkOverlayManualPosition = true;
+            destination.NetworkOverlayLeft = source.NetworkOverlayLeft;
+            destination.NetworkOverlayTop = source.NetworkOverlayTop;
+            destination.NetworkOverlayWidth = source.NetworkOverlayWidth;
+            destination.NetworkOverlayHeight = source.NetworkOverlayHeight;
+        }
+
         private void RemoveOverlay()
         {
             if (overlay == null)
@@ -206,6 +336,7 @@ namespace ShowPing
             canvas?.Children.Remove(overlay);
             overlayCanvas = null;
             overlay = null;
+            overlayPositionInitialized = false;
         }
 
         private void Monitor_SnapshotChanged(NetworkSnapshot nextSnapshot)
@@ -217,7 +348,7 @@ namespace ShowPing
 
             Action update = () =>
             {
-                if (overlay != null && settings != null)
+                if (!previewActive && overlay != null && settings != null)
                     overlay.SetNetworkState(snapshot, settings);
             };
 
@@ -243,6 +374,11 @@ namespace ShowPing
             var canvasHeight = canvas.ActualHeight;
             if (canvasWidth <= 0 || canvasHeight <= 0)
                 return;
+            if (!force && overlayPositionInitialized)
+            {
+                placement?.UpdateGrip();
+                return;
+            }
 
             if (settings.NetworkOverlayManualPosition && !force)
             {
@@ -250,6 +386,7 @@ namespace ShowPing
                 var savedTop = settings.NetworkOverlayTop;
                 ClampToCanvas(ref savedLeft, ref savedTop);
                 SetOverlayPosition(savedLeft, savedTop);
+                overlayPositionInitialized = true;
                 return;
             }
 
@@ -257,6 +394,7 @@ namespace ShowPing
             double top;
             GetDefaultPosition(out left, out top);
             SetOverlayPosition(left, top);
+            overlayPositionInitialized = true;
         }
 
         private void GetDefaultPosition(out double left, out double top)
@@ -265,8 +403,8 @@ namespace ShowPing
             var width = canvas?.ActualWidth ?? 0;
             var height = canvas?.ActualHeight ?? 0;
 
-            var overlayWidth = GetOverlayWidth();
-            var overlayHeight = GetOverlayHeight();
+            var overlayWidth = GetOverlayPlacementWidth();
+            var overlayHeight = GetOverlayPlacementHeight();
 
             left = width - overlayWidth - 24;
             top = height - overlayHeight - 170;
@@ -323,13 +461,33 @@ namespace ShowPing
             return overlay.MinHeight > 0 ? overlay.MinHeight : settings.NetworkOverlayHeight;
         }
 
+        private double GetOverlayPlacementWidth()
+        {
+            return overlay == null
+                ? settings.NetworkOverlayWidth
+                : Math.Max(GetOverlayWidth(), overlay.ReservedPlacementWidth);
+        }
+
+        private double GetOverlayPlacementHeight()
+        {
+            return overlay == null
+                ? settings.NetworkOverlayHeight
+                : Math.Max(GetOverlayHeight(), overlay.ReservedPlacementHeight);
+        }
+
         private void EnsureSizeChangedHandler(Canvas canvas)
         {
             if (canvas == null)
                 return;
 
             if (sizeChangedHandler == null)
-                sizeChangedHandler = (sender, args) => PositionOverlay(false);
+            {
+                sizeChangedHandler = (sender, args) =>
+                {
+                    overlayPositionInitialized = false;
+                    PositionOverlay(false);
+                };
+            }
 
             if (sizeChangedCanvas == canvas)
                 return;
