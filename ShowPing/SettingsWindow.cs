@@ -1,9 +1,13 @@
 using System;
+using System.Diagnostics;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using Hearthstone_Deck_Tracker.Utility.Logging;
 
 namespace ShowPing
 {
@@ -24,11 +28,15 @@ namespace ShowPing
         private TextBlock opacityValueTextBlock;
         private readonly TextBlock statusTextBlock;
         private readonly TextBlock versionTextBlock;
+        private readonly Button updateCheckButton;
+        private readonly Version installedVersion;
         private readonly Action<ShowPingSettings> applySettings;
         private readonly Action<ShowPingSettings> previewSettings;
         private readonly Action stopPreview;
         private readonly Button previewButton;
+        private CancellationTokenSource updateCheckCancellation;
         private bool previewActive;
+        private bool isClosed;
 
         public SettingsWindow(
             ShowPingSettings settings,
@@ -40,12 +48,13 @@ namespace ShowPing
             this.applySettings = applySettings;
             this.previewSettings = previewSettings;
             this.stopPreview = stopPreview;
+            installedVersion = version;
             ResultSettings = settings.Clone();
 
-            Title = "ShowPing";
-            Width = 440;
+            Title = "Show Ping";
+            Width = 620;
             Height = 560;
-            MinWidth = 420;
+            MinWidth = 580;
             MinHeight = 470;
             ResizeMode = ResizeMode.CanResizeWithGrip;
             ShowInTaskbar = false;
@@ -121,25 +130,47 @@ namespace ShowPing
             {
                 Margin = new Thickness(0, 10, 0, 0)
             };
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(290) });
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             Grid.SetRow(footer, 1);
+
+            var versionPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(versionPanel, 0);
+
+            updateCheckButton = new Button
+            {
+                Content = "↻",
+                Width = 24,
+                Height = 24,
+                Padding = new Thickness(0),
+                Margin = new Thickness(0, 0, 7, 0),
+                ToolTip = "Check for updates"
+            };
+            updateCheckButton.Click += UpdateCheckButton_Click;
 
             versionTextBlock = new TextBlock
             {
                 Text = "Version " + version.ToString(2),
                 FontSize = 11,
                 Foreground = Brushes.Gray,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                Width = 255,
+                TextTrimming = TextTrimming.CharacterEllipsis
             };
-            Grid.SetColumn(versionTextBlock, 0);
+            versionPanel.Children.Add(updateCheckButton);
+            versionPanel.Children.Add(versionTextBlock);
 
             var buttons = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Right
             };
-            Grid.SetColumn(buttons, 1);
+            Grid.SetColumn(buttons, 2);
 
             var applyButton = new Button { Content = "Apply", Width = 78, Height = 28, Margin = new Thickness(0, 0, 8, 0) };
             applyButton.Click += ApplyButton_Click;
@@ -150,7 +181,7 @@ namespace ShowPing
             buttons.Children.Add(applyButton);
             buttons.Children.Add(okButton);
             buttons.Children.Add(cancelButton);
-            footer.Children.Add(versionTextBlock);
+            footer.Children.Add(versionPanel);
             footer.Children.Add(buttons);
 
             root.Children.Add(scroller);
@@ -175,6 +206,15 @@ namespace ShowPing
 
         public ShowPingSettings ResultSettings { get; private set; }
         public bool Accepted { get; private set; }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            isClosed = true;
+            var cancellation = updateCheckCancellation;
+            if (cancellation != null)
+                cancellation.Cancel();
+            base.OnClosed(e);
+        }
 
         private void SetSafeOwner()
         {
@@ -454,6 +494,88 @@ namespace ShowPing
             previewSettings(ResultSettings.Clone());
             previewButton.Content = "Stop preview";
             statusTextBlock.Text = "Preview is movable. Failure states change automatically.";
+        }
+
+        private async void UpdateCheckButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (updateCheckCancellation != null)
+                return;
+
+            var cancellation = new CancellationTokenSource();
+            updateCheckCancellation = cancellation;
+            updateCheckButton.IsEnabled = false;
+            SetVersionStatus("checking...");
+
+            try
+            {
+                var result = await VersionChecker.CheckAsync(
+                    installedVersion,
+                    VersionChecker.GetConfiguredRepository(),
+                    VersionChecker.GetConfiguredToken(),
+                    cancellation.Token);
+
+                if (isClosed || cancellation.IsCancellationRequested)
+                    return;
+
+                if (result.UpdateAvailable)
+                    SetUpdateAvailableStatus(result);
+                else
+                    SetVersionStatus("latest");
+            }
+            catch (OperationCanceledException)
+            {
+                if (!isClosed)
+                    SetVersionStatus("check failed");
+            }
+            catch (Exception ex)
+            {
+                if (!isClosed)
+                {
+                    SetVersionStatus("check failed");
+                    Log.Info("Show Ping update check failed: " + ex.GetType().Name);
+                }
+            }
+            finally
+            {
+                if (ReferenceEquals(updateCheckCancellation, cancellation))
+                    updateCheckCancellation = null;
+                cancellation.Dispose();
+                if (!isClosed)
+                    updateCheckButton.IsEnabled = true;
+            }
+        }
+
+        private void SetVersionStatus(string status)
+        {
+            versionTextBlock.Inlines.Clear();
+            versionTextBlock.Inlines.Add(new Run(
+                "Version " + installedVersion.ToString(2) + " — " + status));
+        }
+
+        private void SetUpdateAvailableStatus(VersionCheckResult result)
+        {
+            versionTextBlock.Inlines.Clear();
+            versionTextBlock.Inlines.Add(new Run(
+                "Version " + installedVersion.ToString(2) + " — "));
+
+            var link = new Hyperlink(new Run("update " + result.LatestVersion + " available"))
+            {
+                ToolTip = "Open the latest release"
+            };
+            link.Click += (sender, args) => OpenReleasePage(result.ReleasesUrl);
+            versionTextBlock.Inlines.Add(link);
+        }
+
+        private static void OpenReleasePage(string url)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Log.Info("Show Ping release page could not be opened: " + ex.GetType().Name);
+            }
         }
 
         private void OkButton_Click(object sender, RoutedEventArgs e)

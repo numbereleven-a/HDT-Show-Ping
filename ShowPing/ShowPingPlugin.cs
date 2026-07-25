@@ -26,13 +26,13 @@ namespace ShowPing
         private DateTime nextPositionUpdate = DateTime.MinValue;
         private SizeChangedEventHandler sizeChangedHandler;
 
-        public string Name => "ShowPing";
+        public string Name => "Show Ping";
         public string Description =>
             "Shows Hearthstone server TCP latency and failed checks on a separate network overlay.\n" +
             "https://github.com/numbereleven-a/HDT-Show-Ping";
         public string ButtonText => "Settings";
         public string Author => "numbereleven-a";
-        public Version Version => new Version(1, 5);
+        public Version Version => new Version(1, 6);
         public MenuItem MenuItem { get; private set; }
 
         public void OnLoad()
@@ -104,6 +104,9 @@ namespace ShowPing
                 return;
             }
 
+            if (settings == null)
+                return;
+
             var committedSettings = settings.Clone();
             var window = new SettingsWindow(
                 settings,
@@ -112,7 +115,7 @@ namespace ShowPing
                 {
                     settings = nextSettings;
                     committedSettings = nextSettings.Clone();
-                    ApplySettings(false);
+                    ApplySettings(true);
                 },
                 StartPreview,
                 () => StopPreview(true));
@@ -129,7 +132,7 @@ namespace ShowPing
                 var selectedSettings = window.Accepted ? window.ResultSettings : committedSettings;
                 CopyOverlayPosition(positionedSettings, selectedSettings);
                 settings = selectedSettings;
-                ApplySettings(false);
+                ApplySettings(true);
             };
             window.Show();
         }
@@ -167,15 +170,18 @@ namespace ShowPing
         {
             MenuItem = new MenuItem
             {
-                Header = "ShowPing"
+                Header = "Show Ping"
             };
             MenuItem.Click += (sender, args) => OnButtonPress();
         }
 
-        private void ApplySettings(bool resetPosition)
+        private void ApplySettings(bool reflowPosition)
         {
+            if (settings == null)
+                return;
+
             SettingsStore.Save(settings);
-            monitor.ApplySettings(settings);
+            monitor?.ApplySettings(settings);
             if (previewActive)
             {
                 EnsureOverlay(true);
@@ -197,7 +203,9 @@ namespace ShowPing
                 overlay.ApplySettings(settings);
                 overlay.SetNetworkState(snapshot, settings);
                 overlay.Visibility = Visibility.Visible;
-                PositionOverlay(resetPosition);
+                if (reflowPosition)
+                    overlayPositionInitialized = false;
+                PositionOverlay(false);
             }
         }
 

@@ -30,18 +30,20 @@ It is intended for the Windows version of HDT.
 - Text scale setting from 75% to 150%
 - Font weight setting
 - Configurable check interval from 2 to 10 seconds
+- Manual update check from the settings window
 
 ## How it works
 
-ShowPing detects the current Hearthstone game server from the active Hearthstone process connection and measures TCP connection latency to that endpoint.
+ShowPing detects the current Hearthstone game server from the active Hearthstone process connection and measures TCP connection latency to that endpoint. Each check opens a short TCP connection to the current server endpoint and closes it immediately after the result.
 
 The plugin does not use ICMP ping. `PING` is shown as a simple user-facing label for the measured server connection latency.
+Update checks are manual and only run when the update button in the settings window is pressed.
 
 ## Configuration
 
 Open:
 
-`Options -> Tracker -> Plugins -> ShowPing -> Settings`
+`Options -> Tracker -> Plugins -> Show Ping -> Settings`
 
 Available settings:
 
@@ -73,13 +75,13 @@ Then install it using one of the standard HDT plugin methods:
 1. Open `Options -> Tracker -> Plugins`
 2. Drag the downloaded `.zip` or `.dll` into the plugins window
 3. Restart HDT
-4. Enable `ShowPing`
+4. Enable `Show Ping`
 
 ### Manual install
 
 1. Extract the release archive into `%appdata%\Hearthstone Deck Tracker\Plugins`
 2. Restart HDT
-3. Enable `ShowPing` in `Options -> Tracker -> Plugins`
+3. Enable `Show Ping` in `Options -> Tracker -> Plugins`
 
 If the plugin does not appear, right click `ShowPing.dll`, open `Properties`, and click `Unblock`.
 

@@ -54,11 +54,16 @@ namespace ShowPing
 
         public void Start()
         {
+            if (disposed)
+                return;
             ApplySettings(settings);
         }
 
         public void ApplySettings(ShowPingSettings nextSettings)
         {
+            if (disposed || nextSettings == null)
+                return;
+
             bool enabled;
             lock (sync)
             {
@@ -77,13 +82,15 @@ namespace ShowPing
             else
             {
                 timer.Stop();
+                CancellationTokenSource cancellation;
                 lock (sync)
                 {
-                    CancelCurrentRefreshLocked();
+                    cancellation = ReplaceRefreshCancellationLocked(true);
                     pingHistory.Clear();
                     lastEndpointKey = null;
                     ClearFallbackEndpointLocked();
                 }
+                CancelAndDispose(cancellation);
                 Publish(NetworkSnapshot.Empty);
             }
         }
@@ -93,11 +100,13 @@ namespace ShowPing
             disposed = true;
             timer.Stop();
             timer.Tick -= Timer_Tick;
+            CancellationTokenSource cancellation;
             lock (sync)
             {
-                CancelCurrentRefreshLocked(false);
+                cancellation = ReplaceRefreshCancellationLocked(false);
                 ClearFallbackEndpointLocked();
             }
+            CancelAndDispose(cancellation);
         }
 
         private void Timer_Tick(object sender, EventArgs e)
@@ -112,6 +121,8 @@ namespace ShowPing
             CancellationToken token;
             lock (sync)
             {
+                if (disposed || refreshCancellation == null)
+                    return;
                 version = settingsVersion;
                 enabled = settings.ShowServerPing;
                 token = refreshCancellation.Token;
@@ -380,12 +391,22 @@ namespace ShowPing
             if (isIpAddress && ip.IsIPv4MappedToIPv6)
                 ip = ip.MapToIPv4();
 
-            var stopwatch = Stopwatch.StartNew();
             using (var client = isIpAddress ? new TcpClient(ip.AddressFamily) : new TcpClient())
             using (token.Register(client.Close))
             using (var cts = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
-                var connectTask = isIpAddress ? client.ConnectAsync(ip, port) : client.ConnectAsync(host, port);
+                var started = Stopwatch.GetTimestamp();
+                long completedAt = 0;
+                var rawConnectTask = isIpAddress ? client.ConnectAsync(ip, port) : client.ConnectAsync(host, port);
+                var connectTask = rawConnectTask.ContinueWith(
+                    task =>
+                    {
+                        completedAt = Stopwatch.GetTimestamp();
+                        task.GetAwaiter().GetResult();
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
                 var timeoutTask = Task.Delay(TimeoutMilliseconds, cts.Token);
                 var completed = await Task.WhenAny(connectTask, timeoutTask).ConfigureAwait(false);
                 if (token.IsCancellationRequested)
@@ -402,12 +423,16 @@ namespace ShowPing
                 try
                 {
                     await connectTask.ConfigureAwait(false);
-                    stopwatch.Stop();
                     var remoteEndPoint = client.Client.RemoteEndPoint as IPEndPoint;
                     var remoteAddress = remoteEndPoint?.Address;
                     if (remoteAddress != null && remoteAddress.IsIPv4MappedToIPv6)
                         remoteAddress = remoteAddress.MapToIPv4();
-                    return ProbeResult.Ok(stopwatch.ElapsedMilliseconds, remoteAddress?.ToString());
+                    var elapsedMilliseconds = Math.Max(
+                        0,
+                        (long)Math.Round(
+                            (completedAt - started) * 1000.0 / Stopwatch.Frequency,
+                            MidpointRounding.AwayFromZero));
+                    return ProbeResult.Ok(elapsedMilliseconds, remoteAddress?.ToString());
                 }
                 catch (SocketException ex)
                 {
@@ -438,18 +463,26 @@ namespace ShowPing
             }
         }
 
-        private void CancelCurrentRefreshLocked()
-        {
-            CancelCurrentRefreshLocked(true);
-        }
-
-        private void CancelCurrentRefreshLocked(bool replace)
+        private CancellationTokenSource ReplaceRefreshCancellationLocked(bool replace)
         {
             var previous = refreshCancellation;
-            if (replace)
-                refreshCancellation = new CancellationTokenSource();
-            previous.Cancel();
-            previous.Dispose();
+            refreshCancellation = replace ? new CancellationTokenSource() : null;
+            return previous;
+        }
+
+        private static void CancelAndDispose(CancellationTokenSource cancellation)
+        {
+            if (cancellation == null)
+                return;
+
+            try
+            {
+                cancellation.Cancel();
+            }
+            finally
+            {
+                cancellation.Dispose();
+            }
         }
 
         private void ClearFallbackEndpointLocked()

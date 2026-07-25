@@ -39,7 +39,7 @@ namespace ShowPing
             moveThumb.DragStarted += MoveThumb_DragStarted;
             moveThumb.DragDelta += MoveThumb_DragDelta;
             moveThumb.DragCompleted += MoveThumb_DragCompleted;
-            OverlayExtensions.SetIsOverlayHitTestVisible(moveThumb, true);
+            OverlayExtensions.SetIsOverlayHitTestVisible(moveThumb, false);
 
             if (canvas != null && !canvas.Children.Contains(moveThumb))
             {
@@ -70,6 +70,7 @@ namespace ShowPing
 
         public void Dispose()
         {
+            SetMoveMode(false);
             moveThumb.DragStarted -= MoveThumb_DragStarted;
             moveThumb.DragDelta -= MoveThumb_DragDelta;
             moveThumb.DragCompleted -= MoveThumb_DragCompleted;
@@ -82,7 +83,7 @@ namespace ShowPing
             var moveMode = forceMovable || !settings.PinNetworkOverlayPosition || IsHdtMoveModeActive();
             if (moveMode != lastMoveMode)
             {
-                moveThumb.Visibility = moveMode ? Visibility.Visible : Visibility.Collapsed;
+                SetMoveMode(moveMode);
                 lastMoveMode = moveMode;
             }
 
@@ -93,6 +94,12 @@ namespace ShowPing
             moveThumb.Height = GetElementHeight(overlay);
             Canvas.SetLeft(moveThumb, Canvas.GetLeft(overlay));
             Canvas.SetTop(moveThumb, Canvas.GetTop(overlay));
+        }
+
+        private void SetMoveMode(bool enabled)
+        {
+            OverlayExtensions.SetIsOverlayHitTestVisible(moveThumb, enabled);
+            moveThumb.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void MoveThumb_DragStarted(object sender, DragStartedEventArgs e)

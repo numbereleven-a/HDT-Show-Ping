@@ -13,7 +13,7 @@ namespace ShowPing
         public bool ShowEndpointIp { get; set; }
         public bool ShowRegion { get; set; } = true;
         public bool CompactMode { get; set; } = true;
-        public bool PinNetworkOverlayPosition { get; set; }
+        public bool PinNetworkOverlayPosition { get; set; } = true;
         public bool NetworkOverlayManualPosition { get; set; }
         public int FontWeightMode { get; set; } = 1;
         public int TextScalePercent { get; set; } = 100;
@@ -65,10 +65,12 @@ namespace ShowPing
                 FontWeightMode = 0;
             if (FontWeightMode > 3)
                 FontWeightMode = 3;
-            if (NetworkOverlayWidth < 70)
-                NetworkOverlayWidth = 70;
-            if (NetworkOverlayHeight < 18)
-                NetworkOverlayHeight = 18;
+            if (double.IsNaN(NetworkOverlayWidth) || double.IsInfinity(NetworkOverlayWidth))
+                NetworkOverlayWidth = 106;
+            if (double.IsNaN(NetworkOverlayHeight) || double.IsInfinity(NetworkOverlayHeight))
+                NetworkOverlayHeight = 36;
+            NetworkOverlayWidth = Math.Max(70, Math.Min(4000, NetworkOverlayWidth));
+            NetworkOverlayHeight = Math.Max(18, Math.Min(4000, NetworkOverlayHeight));
             if (double.IsNaN(NetworkOverlayLeft) || double.IsInfinity(NetworkOverlayLeft))
                 NetworkOverlayLeft = 100;
             if (double.IsNaN(NetworkOverlayTop) || double.IsInfinity(NetworkOverlayTop))
