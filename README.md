@@ -1,4 +1,4 @@
-# ShowPing
+# Show Ping
 
 ShowPing is a plugin for [Hearthstone Deck Tracker](https://github.com/HearthSim/Hearthstone-Deck-Tracker) that displays Hearthstone server latency in a separate in-game overlay.
 
