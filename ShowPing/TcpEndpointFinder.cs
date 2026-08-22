@@ -36,13 +36,17 @@ namespace ShowPing
                 .Where(x => pids.Contains(x.OwningProcess))
                 .ToList();
 
-            var filteredConnections = connections
+            var ipv4Connections = connections
+                .Where(x => x.Address.AddressFamily == AddressFamily.InterNetwork)
+                .ToList();
+
+            var filteredConnections = ipv4Connections
                 .Where(x => IsUsefulRemoteAddress(x.Address))
                 .ToList();
 
             EndpointCandidate selected;
             if (!TrySelectEndpoint(filteredConnections, preferredAddress, preferredPort, out selected)
-                && !TrySelectEndpoint(connections, preferredAddress, preferredPort, out selected))
+                && !TrySelectEndpoint(ipv4Connections, preferredAddress, preferredPort, out selected))
                 return false;
 
             address = selected.Address.ToString();
@@ -91,11 +95,10 @@ namespace ShowPing
             IPAddress preferred;
             if (!IPAddress.TryParse(preferredAddress.Trim('[', ']'), out preferred))
                 return false;
-
-            if (candidate.Address.IsIPv4MappedToIPv6)
-                return candidate.Address.MapToIPv4().Equals(preferred);
             if (preferred.IsIPv4MappedToIPv6)
                 preferred = preferred.MapToIPv4();
+            if (preferred.AddressFamily != AddressFamily.InterNetwork)
+                return false;
 
             return candidate.Address.Equals(preferred);
         }
@@ -131,6 +134,10 @@ namespace ShowPing
                                 IPAddress address;
                                 ushort port;
                                 if (!IPAddress.TryParse(remoteAddress, out address))
+                                    continue;
+                                if (address.IsIPv4MappedToIPv6)
+                                    address = address.MapToIPv4();
+                                if (address.AddressFamily != AddressFamily.InterNetwork)
                                     continue;
                                 if (!ushort.TryParse(Convert.ToString(row["RemotePort"]), out port))
                                     continue;
@@ -178,38 +185,27 @@ namespace ShowPing
         {
             if (address.IsIPv4MappedToIPv6)
                 address = address.MapToIPv4();
+            if (address.AddressFamily != AddressFamily.InterNetwork)
+                return false;
 
             if (IPAddress.IsLoopback(address))
                 return false;
-            if (IPAddress.Any.Equals(address) || IPAddress.IPv6Any.Equals(address))
+            if (IPAddress.Any.Equals(address))
                 return false;
 
             var bytes = address.GetAddressBytes();
-            if (address.AddressFamily == AddressFamily.InterNetwork)
-            {
-                if ((bytes[0] & 0xF0) == 0xE0)
-                    return false;
-                if (bytes[0] == 10)
-                    return false;
-                if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
-                    return false;
-                if (bytes[0] == 192 && bytes[1] == 168)
-                    return false;
-                if (bytes[0] == 169 && bytes[1] == 254)
-                    return false;
-                if (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127)
-                    return false;
-                return true;
-            }
-
-            if (address.AddressFamily != AddressFamily.InterNetworkV6)
+            if ((bytes[0] & 0xF0) == 0xE0)
                 return false;
-
-            if (address.IsIPv6LinkLocal || address.IsIPv6Multicast || address.IsIPv6SiteLocal)
+            if (bytes[0] == 10)
                 return false;
-            if (bytes.Length > 0 && (bytes[0] & 0xFE) == 0xFC)
+            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
                 return false;
-
+            if (bytes[0] == 192 && bytes[1] == 168)
+                return false;
+            if (bytes[0] == 169 && bytes[1] == 254)
+                return false;
+            if (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127)
+                return false;
             return true;
         }
 

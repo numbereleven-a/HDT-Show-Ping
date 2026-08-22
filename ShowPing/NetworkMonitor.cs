@@ -328,8 +328,12 @@ namespace ShowPing
                 IPAddress parsed;
                 if (!IPAddress.TryParse(address.Trim('[', ']'), out parsed))
                     return null;
+                if (parsed.IsIPv4MappedToIPv6)
+                    parsed = parsed.MapToIPv4();
+                if (parsed.AddressFamily != AddressFamily.InterNetwork)
+                    return null;
 
-                return new Endpoint(address, (ushort)port);
+                return new Endpoint(parsed.ToString(), (ushort)port);
             }
             catch (Exception ex)
             {
@@ -386,18 +390,20 @@ namespace ShowPing
 
             var host = address.Trim('[', ']');
             IPAddress ip;
-            var isIpAddress = IPAddress.TryParse(host, out ip);
-
-            if (isIpAddress && ip.IsIPv4MappedToIPv6)
+            if (!IPAddress.TryParse(host, out ip))
+                return ProbeResult.InternalError("invalid address");
+            if (ip.IsIPv4MappedToIPv6)
                 ip = ip.MapToIPv4();
+            if (ip.AddressFamily != AddressFamily.InterNetwork)
+                return ProbeResult.InternalError("IPv4 required");
 
-            using (var client = isIpAddress ? new TcpClient(ip.AddressFamily) : new TcpClient())
+            using (var client = new TcpClient(AddressFamily.InterNetwork))
             using (token.Register(client.Close))
             using (var cts = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
                 var started = Stopwatch.GetTimestamp();
                 long completedAt = 0;
-                var rawConnectTask = isIpAddress ? client.ConnectAsync(ip, port) : client.ConnectAsync(host, port);
+                var rawConnectTask = client.ConnectAsync(ip, port);
                 var connectTask = rawConnectTask.ContinueWith(
                     task =>
                     {
@@ -427,6 +433,8 @@ namespace ShowPing
                     var remoteAddress = remoteEndPoint?.Address;
                     if (remoteAddress != null && remoteAddress.IsIPv4MappedToIPv6)
                         remoteAddress = remoteAddress.MapToIPv4();
+                    if (remoteAddress != null && remoteAddress.AddressFamily != AddressFamily.InterNetwork)
+                        remoteAddress = null;
                     var elapsedMilliseconds = Math.Max(
                         0,
                         (long)Math.Round(
@@ -630,8 +638,7 @@ namespace ShowPing
         {
             if (string.IsNullOrWhiteSpace(address))
                 return null;
-            var formattedAddress = address.Contains(":") ? "[" + address + "]" : address;
-            return port > 0 ? formattedAddress + ":" + port : formattedAddress;
+            return port > 0 ? address + ":" + port : address;
         }
     }
 

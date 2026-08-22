@@ -7,6 +7,9 @@ namespace ShowPing
 {
     public class ShowPingSettings
     {
+        internal const int CurrentSchemaVersion = 2;
+
+        public int SettingsSchemaVersion { get; set; }
         public bool ShowServerPing { get; set; } = true;
         public bool ShowPacketLoss { get; set; } = true;
         public bool OnlyShowFailedChecksWhenDetected { get; set; } = true;
@@ -28,6 +31,7 @@ namespace ShowPing
         {
             return new ShowPingSettings
             {
+                SettingsSchemaVersion = SettingsSchemaVersion,
                 ShowServerPing = ShowServerPing,
                 ShowPacketLoss = ShowPacketLoss,
                 OnlyShowFailedChecksWhenDetected = OnlyShowFailedChecksWhenDetected,
@@ -89,18 +93,21 @@ namespace ShowPing
         public static ShowPingSettings Load()
         {
             if (!File.Exists(FilePath))
-                return new ShowPingSettings();
+                return CreateDefaultSettings();
 
             try
             {
                 var settings = XmlManager<ShowPingSettings>.Load(FilePath);
+                var migrated = MigrateSettings(settings);
                 settings.Normalize();
+                if (migrated)
+                    Save(settings);
                 return settings;
             }
             catch (Exception ex)
             {
                 Log.Error("ShowPing settings load error:\n" + ex);
-                return new ShowPingSettings();
+                return CreateDefaultSettings();
             }
         }
 
@@ -108,6 +115,7 @@ namespace ShowPing
         {
             try
             {
+                settings.SettingsSchemaVersion = ShowPingSettings.CurrentSchemaVersion;
                 settings.Normalize();
                 XmlManager<ShowPingSettings>.Save(FilePath, settings);
             }
@@ -115,6 +123,24 @@ namespace ShowPing
             {
                 Log.Error("ShowPing settings save error:\n" + ex);
             }
+        }
+
+        private static ShowPingSettings CreateDefaultSettings()
+        {
+            return new ShowPingSettings
+            {
+                SettingsSchemaVersion = ShowPingSettings.CurrentSchemaVersion
+            };
+        }
+
+        internal static bool MigrateSettings(ShowPingSettings settings)
+        {
+            if (settings.SettingsSchemaVersion >= ShowPingSettings.CurrentSchemaVersion)
+                return false;
+
+            settings.PinNetworkOverlayPosition = true;
+            settings.SettingsSchemaVersion = ShowPingSettings.CurrentSchemaVersion;
+            return true;
         }
     }
 }

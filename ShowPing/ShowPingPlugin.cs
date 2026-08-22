@@ -32,7 +32,7 @@ namespace ShowPing
             "https://github.com/numbereleven-a/HDT-Show-Ping";
         public string ButtonText => "Settings";
         public string Author => "numbereleven-a";
-        public Version Version => new Version(1, 6);
+        public Version Version => new Version(1, 7);
         public MenuItem MenuItem { get; private set; }
 
         public void OnLoad()
@@ -204,9 +204,30 @@ namespace ShowPing
                 overlay.SetNetworkState(snapshot, settings);
                 overlay.Visibility = Visibility.Visible;
                 if (reflowPosition)
+                {
                     overlayPositionInitialized = false;
+                    SchedulePositionReflow(overlay);
+                }
                 PositionOverlay(false);
             }
+        }
+
+        private void SchedulePositionReflow(NetworkOverlayControl targetOverlay)
+        {
+            if (targetOverlay.Dispatcher.HasShutdownStarted || targetOverlay.Dispatcher.HasShutdownFinished)
+                return;
+
+            targetOverlay.Dispatcher.BeginInvoke(
+                DispatcherPriority.Loaded,
+                new Action(() =>
+                {
+                    if (!ReferenceEquals(overlay, targetOverlay) || previewActive || settings == null)
+                        return;
+
+                    targetOverlay.UpdateLayout();
+                    overlayPositionInitialized = false;
+                    PositionOverlay(false);
+                }));
         }
 
         private void EnsureOverlay(bool force)

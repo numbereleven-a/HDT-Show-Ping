@@ -218,7 +218,23 @@ namespace ShowPing
 
         private void SetSafeOwner()
         {
-            var owner = Application.Current?.MainWindow;
+            var application = Application.Current;
+            Window owner = null;
+            if (application != null)
+            {
+                foreach (Window candidate in application.Windows)
+                {
+                    if (candidate != this && candidate.IsVisible && candidate.IsActive)
+                    {
+                        owner = candidate;
+                        break;
+                    }
+                }
+
+                if (owner == null && application.MainWindow != this && application.MainWindow?.IsVisible == true)
+                    owner = application.MainWindow;
+            }
+
             if (owner == null || owner == this)
             {
                 WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -227,7 +243,7 @@ namespace ShowPing
 
             try
             {
-                if (owner.IsVisible || new WindowInteropHelper(owner).Handle != IntPtr.Zero)
+                if (owner.IsVisible && new WindowInteropHelper(owner).Handle != IntPtr.Zero)
                 {
                     Owner = owner;
                     WindowStartupLocation = WindowStartupLocation.CenterOwner;
