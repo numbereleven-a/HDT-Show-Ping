@@ -32,7 +32,7 @@ namespace ShowPing
             "https://github.com/numbereleven-a/HDT-Show-Ping";
         public string ButtonText => "Settings";
         public string Author => "numbereleven-a";
-        public Version Version => new Version(1, 7);
+        public Version Version => typeof(ShowPingPlugin).Assembly.GetName().Version;
         public MenuItem MenuItem { get; private set; }
 
         public void OnLoad()

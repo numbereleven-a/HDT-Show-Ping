@@ -21,7 +21,7 @@ namespace ShowPing
         private const int TimeoutMilliseconds = 1500;
         private const int FallbackLookupTimeoutMilliseconds = 1200;
         private const int PacketLossSampleSize = 10;
-        private static readonly TimeSpan FallbackRefreshInterval = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan FallbackRefreshInterval = TimeSpan.FromSeconds(60);
         private static readonly TimeSpan FallbackFailureCooldown = TimeSpan.FromSeconds(30);
         private static readonly TimeSpan ErrorLogInterval = TimeSpan.FromMinutes(2);
 
@@ -195,7 +195,10 @@ namespace ShowPing
             }
 
             if (probe.CountAsNetworkFailure)
+            {
+                InvalidateFallbackEndpointIfMatches(endpoint);
                 RecordPingResult(false);
+            }
 
             return NetworkSnapshot.Unavailable(probe.Status, GetFailurePercent(), endpoint.Address, endpoint.Port, probe.RemoteAddress);
         }
@@ -471,6 +474,23 @@ namespace ShowPing
             }
         }
 
+        private void InvalidateFallbackEndpointIfMatches(Endpoint endpoint)
+        {
+            lock (sync)
+            {
+                if (cachedFallbackEndpoint == null || endpoint == null ||
+                    cachedFallbackEndpoint.Port != endpoint.Port ||
+                    !string.Equals(cachedFallbackEndpoint.Address, endpoint.Address, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                cachedFallbackEndpoint = null;
+                nextFallbackRefreshUtc = DateTime.MinValue;
+                fallbackLookupBlockedUntilUtc = DateTime.MinValue;
+            }
+        }
+
         private CancellationTokenSource ReplaceRefreshCancellationLocked(bool replace)
         {
             var previous = refreshCancellation;
@@ -573,8 +593,16 @@ namespace ShowPing
 
     internal sealed class NetworkSnapshot
     {
-        public static readonly NetworkSnapshot Empty = new NetworkSnapshot("--", "--", -1, Brushes.Gray, null, null, false);
-        private NetworkSnapshot(string pingValue, string lossValue, int failurePercent, Brush brush, string endpoint, string endpointIp, bool hasMeasurement)
+        public static readonly NetworkSnapshot Empty = new NetworkSnapshot("--", "--", -1, Brushes.Gray, null, null, false, null);
+        private NetworkSnapshot(
+            string pingValue,
+            string lossValue,
+            int failurePercent,
+            Brush brush,
+            string endpoint,
+            string endpointIp,
+            bool hasMeasurement,
+            string status)
         {
             PingValue = pingValue;
             LossValue = lossValue;
@@ -583,6 +611,7 @@ namespace ShowPing
             Endpoint = endpoint;
             EndpointIp = endpointIp;
             HasMeasurement = hasMeasurement;
+            Status = status;
         }
 
         public string PingValue { get; }
@@ -592,6 +621,7 @@ namespace ShowPing
         public string Endpoint { get; }
         public string EndpointIp { get; }
         public bool HasMeasurement { get; }
+        public string Status { get; }
 
         public string PingText => "PING: " + PingValue;
         public string LossText => "CHECK FAIL: " + LossValue;
@@ -605,24 +635,26 @@ namespace ShowPing
                 GetPingBrush(milliseconds),
                 FormatEndpoint(address, port),
                 FormatEndpoint(endpointIp, port),
-                true);
+                true,
+                null);
         }
 
         public static NetworkSnapshot NoTarget(string reason)
         {
-            return new NetworkSnapshot(reason, "--", -1, Brushes.Gray, null, null, false);
+            return new NetworkSnapshot("\u2014", "--", -1, Brushes.Gray, null, null, false, reason);
         }
 
         public static NetworkSnapshot Unavailable(string status, int failedPercent, string address, ushort port, string endpointIp)
         {
             return new NetworkSnapshot(
-                status,
+                "\u2014",
                 failedPercent + "%",
                 failedPercent,
                 Brushes.Red,
                 FormatEndpoint(address, port),
                 FormatEndpoint(endpointIp, port),
-                true);
+                false,
+                status);
         }
 
         private static Brush GetPingBrush(long milliseconds)
