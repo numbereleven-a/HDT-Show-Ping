@@ -155,7 +155,7 @@ namespace ShowPing
 
             versionTextBlock = new TextBlock
             {
-                Text = "Version " + version.ToString(2),
+                Text = "Version " + version.ToString(3),
                 FontSize = 11,
                 Foreground = Brushes.Gray,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -565,14 +565,14 @@ namespace ShowPing
         {
             versionTextBlock.Inlines.Clear();
             versionTextBlock.Inlines.Add(new Run(
-                "Version " + installedVersion.ToString(2) + " — " + status));
+                "Version " + installedVersion.ToString(3) + " — " + status));
         }
 
         private void SetUpdateAvailableStatus(VersionCheckResult result)
         {
             versionTextBlock.Inlines.Clear();
             versionTextBlock.Inlines.Add(new Run(
-                "Version " + installedVersion.ToString(2) + " — "));
+                "Version " + installedVersion.ToString(3) + " — "));
 
             var link = new Hyperlink(new Run("update " + result.LatestVersion + " available"))
             {

@@ -629,7 +629,7 @@ namespace ShowPing
         public static NetworkSnapshot Success(long milliseconds, int failedPercent, string address, ushort port, string endpointIp)
         {
             return new NetworkSnapshot(
-                milliseconds + " ms",
+                FormatPingValue(milliseconds),
                 failedPercent + "%",
                 failedPercent,
                 GetPingBrush(milliseconds),
@@ -637,6 +637,11 @@ namespace ShowPing
                 FormatEndpoint(endpointIp, port),
                 true,
                 null);
+        }
+
+        private static string FormatPingValue(long milliseconds)
+        {
+            return Math.Min(milliseconds, 999) + " ms";
         }
 
         public static NetworkSnapshot NoTarget(string reason)

@@ -10,7 +10,9 @@ namespace ShowPing
 {
     internal sealed class NetworkOverlayControl : Border
     {
-        private readonly TextBlock pingTextBlock;
+        private readonly TextBlock pingLabelTextBlock;
+        private readonly TextBlock pingValueTextBlock;
+        private readonly TextBlock compactLossTextBlock;
         private readonly TextBlock lossTextBlock;
         private readonly TextBlock compactRegionTextBlock;
         private readonly TextBlock regionTextBlock;
@@ -21,10 +23,14 @@ namespace ShowPing
 
         public NetworkOverlayControl()
         {
-            pingTextBlock = CreateTextBlock(13);
-            pingTextBlock.Text = "PING: --";
+            pingLabelTextBlock = CreateTextBlock(13);
+            pingLabelTextBlock.Text = "PING: ";
+            pingValueTextBlock = CreateTextBlock(13);
+            pingValueTextBlock.Text = "--";
 
-            lossTextBlock = CreateTextBlock(12);
+            compactLossTextBlock = CreateTextBlock(13);
+            compactLossTextBlock.Text = "";
+            lossTextBlock = CreateTextBlock(13);
             lossTextBlock.Text = "CHECK FAIL: --";
             compactRegionTextBlock = CreateTextBlock(13);
             compactRegionTextBlock.Text = "";
@@ -39,9 +45,10 @@ namespace ShowPing
                 VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Left
             };
-            primaryRow.Children.Add(pingTextBlock);
-            primaryRow.Children.Add(lossTextBlock);
+            primaryRow.Children.Add(pingLabelTextBlock);
+            primaryRow.Children.Add(pingValueTextBlock);
             primaryRow.Children.Add(compactRegionTextBlock);
+            primaryRow.Children.Add(compactLossTextBlock);
 
             var stack = new StackPanel
             {
@@ -50,6 +57,7 @@ namespace ShowPing
             };
             stack.Children.Add(primaryRow);
             stack.Children.Add(regionTextBlock);
+            stack.Children.Add(lossTextBlock);
             stack.Children.Add(endpointTextBlock);
 
             BorderThickness = new Thickness(1);
@@ -60,25 +68,37 @@ namespace ShowPing
         public void ApplySettings(ShowPingSettings settings)
         {
             var scale = settings.TextScalePercent / 100.0;
-            pingTextBlock.FontSize = 13 * scale;
+            pingLabelTextBlock.FontSize = 13 * scale;
+            pingValueTextBlock.FontSize = 13 * scale;
+            compactLossTextBlock.FontSize = 13 * scale;
             lossTextBlock.FontSize = 13 * scale;
             compactRegionTextBlock.FontSize = 13 * scale;
             regionTextBlock.FontSize = 13 * scale;
             endpointTextBlock.FontSize = 13 * scale;
 
             var fontWeight = GetFontWeight(settings.FontWeightMode);
-            pingTextBlock.FontWeight = fontWeight;
+            pingLabelTextBlock.FontWeight = fontWeight;
+            pingValueTextBlock.FontWeight = fontWeight;
+            compactLossTextBlock.FontWeight = fontWeight;
             lossTextBlock.FontWeight = fontWeight;
             compactRegionTextBlock.FontWeight = fontWeight;
             regionTextBlock.FontWeight = fontWeight;
             endpointTextBlock.FontWeight = fontWeight;
+
+            pingLabelTextBlock.Text = settings.CompactMode ? "PING " : "PING: ";
+            pingValueTextBlock.Width = settings.CompactMode
+                ? Math.Ceiling(MeasureTextWidth("999 ms", 13 * scale, fontWeight))
+                : double.NaN;
+            pingValueTextBlock.TextAlignment = settings.CompactMode
+                ? TextAlignment.Right
+                : TextAlignment.Left;
 
             Width = double.NaN;
             Height = double.NaN;
             MinWidth = GetMinWidth(settings) * scale;
             MinHeight = GetMinHeight(settings) * scale;
             ReservedPlacementWidth = GetReservedPlacementWidth(settings, scale, fontWeight);
-            ReservedPlacementHeight = MinHeight;
+            ReservedPlacementHeight = GetReservedPlacementHeight(settings, scale);
 
             var alpha = (byte)Math.Round(255 * settings.OverlayOpacityPercent / 100.0);
             BorderBrush = new SolidColorBrush(Color.FromArgb(alpha, 0x14, 0x16, 0x17));
@@ -92,21 +112,27 @@ namespace ShowPing
             var showLoss = settings.ShowPacketLoss
                 && (!settings.OnlyShowFailedChecksWhenDetected || snapshot.FailurePercent > 0);
 
-            pingTextBlock.Text = settings.CompactMode ? "PING " + snapshot.PingValue : snapshot.PingText;
-            pingTextBlock.Foreground = snapshot.Brush;
-            lossTextBlock.Text = settings.CompactMode
-                ? " \u00b7 FAIL " + snapshot.LossValue
-                : "   CHECK FAIL: " + snapshot.LossValue;
-            lossTextBlock.Foreground = GetFailureBrush(snapshot.FailurePercent);
-            lossTextBlock.Visibility = showLoss ? Visibility.Visible : Visibility.Collapsed;
+            pingValueTextBlock.Text = snapshot.PingValue;
+            pingLabelTextBlock.Foreground = snapshot.Brush;
+            pingValueTextBlock.Foreground = snapshot.Brush;
             compactRegionTextBlock.Text = settings.CompactMode && regionText != null ? " \u00b7 " + regionText : "";
             compactRegionTextBlock.Foreground = snapshot.Brush;
             compactRegionTextBlock.Visibility = settings.CompactMode && regionText != null
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+            compactLossTextBlock.Text = " \u00b7 FAIL " + snapshot.LossValue;
+            compactLossTextBlock.Foreground = GetFailureBrush(snapshot.FailurePercent);
+            compactLossTextBlock.Visibility = settings.CompactMode && showLoss
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             regionTextBlock.Text = settings.CompactMode || regionText == null ? "" : "REGION: " + regionText;
             regionTextBlock.Foreground = snapshot.Brush;
             regionTextBlock.Visibility = settings.CompactMode || regionText == null ? Visibility.Collapsed : Visibility.Visible;
+            lossTextBlock.Text = "CHECK FAIL: " + snapshot.LossValue;
+            lossTextBlock.Foreground = GetFailureBrush(snapshot.FailurePercent);
+            lossTextBlock.Visibility = !settings.CompactMode && showLoss
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             endpointTextBlock.Text = endpointText ?? "";
             endpointTextBlock.Foreground = snapshot.Brush;
             endpointTextBlock.Visibility = string.IsNullOrWhiteSpace(endpointText) ? Visibility.Collapsed : Visibility.Visible;
@@ -171,24 +197,41 @@ namespace ShowPing
             return Math.Max(18, 6 + lines * 14);
         }
 
+        private static double GetReservedPlacementHeight(ShowPingSettings settings, double scale)
+        {
+            var lines = 1;
+            if (!settings.CompactMode && settings.ShowRegion)
+                lines++;
+            if (!settings.CompactMode && settings.ShowPacketLoss)
+                lines++;
+            if (settings.ShowEndpointIp)
+                lines++;
+            return Math.Max(18, 6 + lines * 14) * scale;
+        }
+
         private double GetReservedPlacementWidth(
             ShowPingSettings settings,
             double scale,
             FontWeight fontWeight)
         {
-            var primaryText = settings.CompactMode ? "PING 9999 ms" : "PING: 9999 ms";
-            if (settings.ShowPacketLoss)
+            double width;
+            if (settings.CompactMode)
             {
-                primaryText += settings.CompactMode
-                    ? " \u00b7 FAIL 100%"
-                    : "   CHECK FAIL: 100%";
+                var primaryText = "PING 999 ms";
+                if (settings.ShowRegion)
+                    primaryText += " \u00b7 CHINA";
+                if (settings.ShowPacketLoss)
+                    primaryText += " \u00b7 FAIL 100%";
+                width = MeasureTextWidth(primaryText, 13 * scale, fontWeight);
             }
-            if (settings.CompactMode && settings.ShowRegion)
-                primaryText += " \u00b7 CHINA";
-
-            var width = MeasureTextWidth(primaryText, 13 * scale, fontWeight);
-            if (!settings.CompactMode && settings.ShowRegion)
-                width = Math.Max(width, MeasureTextWidth("REGION: CHINA", 13 * scale, fontWeight));
+            else
+            {
+                width = MeasureTextWidth("PING: 999 ms", 13 * scale, fontWeight);
+                if (settings.ShowRegion)
+                    width = Math.Max(width, MeasureTextWidth("REGION: CHINA", 13 * scale, fontWeight));
+                if (settings.ShowPacketLoss)
+                    width = Math.Max(width, MeasureTextWidth("CHECK FAIL: 100%", 13 * scale, fontWeight));
+            }
             if (settings.ShowEndpointIp)
                 width = Math.Max(width, MeasureTextWidth("255.255.255.255:65535", 13 * scale, fontWeight));
 
@@ -200,7 +243,7 @@ namespace ShowPing
             var textBlock = new TextBlock
             {
                 Text = text,
-                FontFamily = pingTextBlock.FontFamily,
+                FontFamily = pingValueTextBlock.FontFamily,
                 FontSize = fontSize,
                 FontWeight = fontWeight,
                 TextWrapping = TextWrapping.NoWrap
