@@ -207,7 +207,11 @@ namespace ShowPing
         {
             var endpoint = TryGetHdtServerInfoEndpoint();
             if (endpoint != null)
+            {
+                lock (sync)
+                    ClearFallbackEndpointLocked();
                 return endpoint;
+            }
 
             return await GetFallbackEndpointBoundedAsync(token).ConfigureAwait(false);
         }
@@ -220,6 +224,9 @@ namespace ShowPing
                 var now = DateTime.UtcNow;
                 if (now < nextFallbackRefreshUtc)
                     return cachedFallbackEndpoint;
+
+                // A successful probe does not prove that an expired endpoint still belongs to the game.
+                cachedFallbackEndpoint = null;
 
                 if (fallbackLookupTask != null)
                 {
@@ -265,9 +272,9 @@ namespace ShowPing
 
                     fallbackLookupTask = null;
                     fallbackLookupBlockedUntilUtc = DateTime.MinValue;
-                    nextFallbackRefreshUtc = DateTime.UtcNow.Add(FallbackRefreshInterval);
-                    if (found != null)
-                        cachedFallbackEndpoint = found;
+                    cachedFallbackEndpoint = tcpEndpointFinder.IsAvailable ? found : null;
+                    nextFallbackRefreshUtc = DateTime.UtcNow.Add(
+                        cachedFallbackEndpoint != null ? FallbackRefreshInterval : FallbackFailureCooldown);
                     if (!tcpEndpointFinder.IsAvailable)
                         fallbackLookupBlockedUntilUtc = DateTime.UtcNow.Add(FallbackFailureCooldown);
 

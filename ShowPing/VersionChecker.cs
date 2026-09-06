@@ -32,7 +32,8 @@ namespace ShowPing
 
         private static readonly HttpClient HttpClient = new HttpClient
         {
-            Timeout = TimeSpan.FromSeconds(15)
+            Timeout = TimeSpan.FromSeconds(15),
+            MaxResponseContentBufferSize = 1024 * 1024
         };
 
         private static readonly Regex OwnerRegex = new Regex(
@@ -71,7 +72,7 @@ namespace ShowPing
 
                 using (var response = await HttpClient.SendAsync(
                     request,
-                    HttpCompletionOption.ResponseHeadersRead,
+                    HttpCompletionOption.ResponseContentRead,
                     cancellationToken).ConfigureAwait(false))
                 {
                     response.EnsureSuccessStatusCode();
