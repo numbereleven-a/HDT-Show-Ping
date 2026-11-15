@@ -113,6 +113,7 @@ namespace ShowPing
                 Version,
                 nextSettings =>
                 {
+                    CopyOverlayPosition(settings, nextSettings);
                     settings = nextSettings;
                     committedSettings = nextSettings.Clone();
                     ApplySettings(true);
@@ -186,6 +187,8 @@ namespace ShowPing
             {
                 EnsureOverlay(true);
                 placement?.UpdateSettings(settings);
+                if (reflowPosition && !settings.NetworkOverlayManualPosition)
+                    overlayPositionInitialized = false;
                 RenderPreview();
                 return;
             }
@@ -204,15 +207,13 @@ namespace ShowPing
                 overlay.SetNetworkState(snapshot, settings);
                 overlay.Visibility = Visibility.Visible;
                 if (reflowPosition)
-                {
                     overlayPositionInitialized = false;
-                    SchedulePositionReflow(overlay);
-                }
+                SchedulePositionReflow(overlay, reflowPosition);
                 PositionOverlay(false);
             }
         }
 
-        private void SchedulePositionReflow(NetworkOverlayControl targetOverlay)
+        private void SchedulePositionReflow(NetworkOverlayControl targetOverlay, bool resetPosition)
         {
             if (targetOverlay.Dispatcher.HasShutdownStarted || targetOverlay.Dispatcher.HasShutdownFinished)
                 return;
@@ -221,11 +222,12 @@ namespace ShowPing
                 DispatcherPriority.Loaded,
                 new Action(() =>
                 {
-                    if (!ReferenceEquals(overlay, targetOverlay) || previewActive || settings == null)
+                    if (!ReferenceEquals(overlay, targetOverlay) || settings == null)
                         return;
 
                     targetOverlay.UpdateLayout();
-                    overlayPositionInitialized = false;
+                    if (resetPosition)
+                        overlayPositionInitialized = false;
                     PositionOverlay(false);
                 }));
         }
@@ -258,6 +260,7 @@ namespace ShowPing
             overlayCanvas = canvas;
             placement = new OverlayPlacementController(overlay, settings, () => SettingsStore.Save(settings), canvas);
             PositionOverlay(false);
+            SchedulePositionReflow(overlay, !settings.NetworkOverlayManualPosition);
         }
 
         private void StartPreview(ShowPingSettings nextSettings)
@@ -273,6 +276,8 @@ namespace ShowPing
             placement?.UpdateSettings(settings);
             if (placement != null)
                 placement.ForceMovable = true;
+            if (settings != null && !settings.NetworkOverlayManualPosition)
+                overlayPositionInitialized = false;
             RenderPreview();
 
             if (previewTimer == null)
@@ -312,6 +317,9 @@ namespace ShowPing
             overlay.ApplySettings(settings);
             overlay.SetNetworkState(snapshot, settings);
             overlay.Visibility = Visibility.Visible;
+            if (!settings.NetworkOverlayManualPosition)
+                overlayPositionInitialized = false;
+            SchedulePositionReflow(overlay, !settings.NetworkOverlayManualPosition);
             PositionOverlay(false);
         }
 
@@ -340,6 +348,7 @@ namespace ShowPing
             if (placement != null)
                 placement.ForceMovable = true;
             PositionOverlay(false);
+            SchedulePositionReflow(overlay, settings == null || !settings.NetworkOverlayManualPosition);
         }
 
         private static void CopyOverlayPosition(ShowPingSettings source, ShowPingSettings destination)

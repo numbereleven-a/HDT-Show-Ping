@@ -39,6 +39,7 @@ namespace ShowPing
             moveThumb.DragStarted += MoveThumb_DragStarted;
             moveThumb.DragDelta += MoveThumb_DragDelta;
             moveThumb.DragCompleted += MoveThumb_DragCompleted;
+            moveThumb.Loaded += MoveThumb_Loaded;
             OverlayExtensions.SetIsOverlayHitTestVisible(moveThumb, false);
 
             if (canvas != null && !canvas.Children.Contains(moveThumb))
@@ -71,6 +72,7 @@ namespace ShowPing
         public void Dispose()
         {
             SetMoveMode(false);
+            moveThumb.Loaded -= MoveThumb_Loaded;
             moveThumb.DragStarted -= MoveThumb_DragStarted;
             moveThumb.DragDelta -= MoveThumb_DragDelta;
             moveThumb.DragCompleted -= MoveThumb_DragCompleted;
@@ -98,8 +100,13 @@ namespace ShowPing
 
         private void SetMoveMode(bool enabled)
         {
-            OverlayExtensions.SetIsOverlayHitTestVisible(moveThumb, enabled);
             moveThumb.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+            OverlayExtensions.SetIsOverlayHitTestVisible(moveThumb, enabled && moveThumb.IsLoaded);
+        }
+
+        private void MoveThumb_Loaded(object sender, RoutedEventArgs e)
+        {
+            SetMoveMode(lastMoveMode);
         }
 
         private void MoveThumb_DragStarted(object sender, DragStartedEventArgs e)

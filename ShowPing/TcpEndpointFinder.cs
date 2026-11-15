@@ -15,8 +15,9 @@ namespace ShowPing
         private static readonly TimeSpan ErrorLogInterval = TimeSpan.FromMinutes(2);
         private static readonly object LogSync = new object();
         private static DateTime nextErrorLogUtc = DateTime.MinValue;
+        private volatile bool isAvailable = true;
 
-        public bool IsAvailable { get; private set; } = true;
+        public bool IsAvailable => isAvailable;
         public string LastError { get; private set; }
 
         public bool TryFindCurrentEndpoint(HashSet<uint> pids, out string address, out ushort port)
@@ -117,7 +118,7 @@ namespace ShowPing
 
                 using (var searcher = new ManagementObjectSearcher(
                            new ManagementScope(@"root\StandardCimv2"),
-                           new ObjectQuery("SELECT RemoteAddress, RemotePort, OwningProcess FROM MSFT_NetTCPConnection WHERE State = 5"),
+                           new ObjectQuery("SELECT RemoteAddress, RemotePort, OwningProcess FROM MSFT_NetTCPConnection WHERE State = 5 AND (RemotePort = 1119 OR RemotePort = 3724)"),
                            options))
                 using (var results = searcher.Get())
                 {
@@ -157,8 +158,8 @@ namespace ShowPing
                     }
                 }
 
-                var wasUnavailable = !IsAvailable;
-                IsAvailable = true;
+                var wasUnavailable = !isAvailable;
+                isAvailable = true;
                 LastError = null;
                 if (skippedRows > 0)
                     LogInfoThrottled("ShowPing TCP endpoint rows skipped: " + skippedRows);
@@ -167,13 +168,13 @@ namespace ShowPing
             }
             catch (ManagementException ex)
             {
-                IsAvailable = false;
+                isAvailable = false;
                 LastError = ex.Message;
                 LogInfoThrottled("ShowPing TCP endpoint query unavailable: " + ex.Message);
             }
             catch (Exception ex)
             {
-                IsAvailable = false;
+                isAvailable = false;
                 LastError = ex.Message;
                 LogInfoThrottled("ShowPing TCP endpoint query failed: " + ex.Message);
             }

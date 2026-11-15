@@ -68,9 +68,10 @@ namespace ShowPing
             lock (sync)
             {
                 settings = nextSettings.Clone();
-                settingsVersion++;
                 timer.Interval = GetTimerInterval(settings);
                 enabled = settings.ShowServerPing;
+                if (!enabled)
+                    settingsVersion++;
             }
 
             if (enabled)
@@ -180,9 +181,10 @@ namespace ShowPing
             var endpoint = await GetCurrentEndpointAsync(token).ConfigureAwait(false);
             if (endpoint == null)
             {
+                var recordedFailurePercent = GetRecordedFailurePercent();
                 return tcpEndpointFinder.IsAvailable
-                    ? NetworkSnapshot.NoTarget("no target")
-                    : NetworkSnapshot.NoTarget("tcp table unavailable");
+                    ? NetworkSnapshot.NoTarget("no target", recordedFailurePercent)
+                    : NetworkSnapshot.NoTarget("tcp table unavailable", recordedFailurePercent);
             }
 
             ResetHistoryIfEndpointChanged(endpoint.Address, endpoint.Port);
@@ -426,12 +428,16 @@ namespace ShowPing
                 var timeoutTask = Task.Delay(TimeoutMilliseconds, cts.Token);
                 var completed = await Task.WhenAny(connectTask, timeoutTask).ConfigureAwait(false);
                 if (token.IsCancellationRequested)
+                {
+                    client.Close();
+                    ObserveFault(connectTask);
                     return ProbeResult.InternalError("cancelled");
+                }
 
                 if (completed != connectTask)
                 {
                     client.Close();
-                    _ = connectTask.ContinueWith(task => { var ignored = task.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+                    ObserveFault(connectTask);
                     return ProbeResult.NetworkFailure("timeout");
                 }
 
@@ -576,10 +582,15 @@ namespace ShowPing
 
         private int GetFailurePercent()
         {
+            return Math.Max(0, GetRecordedFailurePercent());
+        }
+
+        private int GetRecordedFailurePercent()
+        {
             lock (sync)
             {
                 if (pingHistory.Count == 0)
-                    return 0;
+                    return -1;
 
                 var failed = 0;
                 foreach (var success in pingHistory)
@@ -651,9 +662,10 @@ namespace ShowPing
             return Math.Min(milliseconds, 999) + " ms";
         }
 
-        public static NetworkSnapshot NoTarget(string reason)
+        public static NetworkSnapshot NoTarget(string reason, int failedPercent = -1)
         {
-            return new NetworkSnapshot("\u2014", "--", -1, Brushes.Gray, null, null, false, reason);
+            var lossValue = failedPercent < 0 ? "--" : failedPercent + "%";
+            return new NetworkSnapshot("\u2014", lossValue, failedPercent, Brushes.Gray, null, null, false, reason);
         }
 
         public static NetworkSnapshot Unavailable(string status, int failedPercent, string address, ushort port, string endpointIp)
