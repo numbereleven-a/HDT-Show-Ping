@@ -1,5 +1,12 @@
 # Show Ping
 
+> [!WARNING]
+> **Hearthstone Deck Tracker (HDT) is ending plugin support on November 30, 2026.**
+>
+> Starting on that date, HDT will no longer load installed plugins or allow new plugins to be installed.
+>
+> [Read HearthSim’s official announcement](https://help.hearthsim.net/en/articles/18470784-what-s-changing-about-plugins-in-hdt)
+
 ShowPing is a plugin for [Hearthstone Deck Tracker](https://github.com/HearthSim/Hearthstone-Deck-Tracker) that displays Hearthstone server latency in a separate in-game overlay.
 
 It is intended for the Windows version of HDT.
